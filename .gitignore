@@ -1,0 +1,30 @@
+# 私人学习数据：绝不提交到公开仓库
+data.json
+data.json.bak
+data.json.*
+backups/
+cache/
+
+# 录音与媒体缓存
+*.wav
+*.webm
+*.mp3
+*.m4a
+*.ogg
+
+# 本地打包产物
+dist/
+*.zip
+
+# Python 可选增强的运行产物
+__pycache__/
+*.pyc
+*.onnx
+tokens.txt
+temp/
+
+# 编辑器 / 依赖
+.vscode/
+.idea/
+.DS_Store
+node_modules/

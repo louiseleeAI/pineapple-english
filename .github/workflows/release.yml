@@ -1,0 +1,43 @@
+name: Release
+
+# Obsidian 社区目录要求：tag 必须严格等于 manifest.json 的 version，且不带 v 前缀。
+on:
+  push:
+    tags:
+      - '[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches manifest.json
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER="$(node -p "require('./manifest.json').version")"
+          echo "tag=$TAG manifest=$VER"
+          if [ "$TAG" != "$VER" ]; then
+            echo "::error::Tag must equal manifest.json version and must not start with v"
+            exit 1
+          fi
+
+      - name: Verify release assets
+        run: |
+          for f in main.js manifest.json styles.css; do
+            test -f "$f" || { echo "::error::Missing $f"; exit 1; }
+          done
+          node --check main.js
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            main.js manifest.json styles.css
