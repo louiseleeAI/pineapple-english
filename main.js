@@ -78,6 +78,12 @@ const PRESETS = [
 // 核心源：首次安装只自动订这四个，其余在「发现订阅」里按需一键订阅
 const CORE_TITLES = ['Espresso English', 'All Ears English', 'Daily Easy English Expression', 'Special English (CGTN)'];
 
+const PROTOCOL = 'pineapple-english-seek';
+const QUOTE_FILE = '英语精听引用.md';
+const QUOTE_TAG = 'english/quote';
+const QUOTE_TITLE = '英语精听引用';
+const QUOTE_NOTICE = '已引用到「英语精听引用.md」（点时间戳可跳回原句）';
+
 const DEFAULT_SETTINGS = {
   noteFolder: 'English',
   vocabFile: 'English/生词本.md',
@@ -88,6 +94,7 @@ const DEFAULT_SETTINGS = {
   lookupOnClick: true,
   maxItemsPerFeed: 40,
   installedPresets: false,
+  onboarded: false,
   whisperDir: '',
   whisperPython: '',
   whisperModelDir: '',
@@ -97,11 +104,30 @@ const DEFAULT_SETTINGS = {
   statsFolder: 'English/学习记录',
   recRawMic: true,
   loopSentence: false,
+  autoAdvance: false,
+  shadowGate: false,
+  segSearch: true,
 };
 
 /* ------------------------------------------------------------------ */
 /* 工具函数                                                             */
 /* ------------------------------------------------------------------ */
+/** 引用句 -> Markdown 行，时间戳是可点回跳的 obsidian:// 链接 */
+function quoteLineFor(seg, it, feed, protocol) {
+  const t = Math.max(0, Math.round(Number((seg && seg.start) || 0)));
+  const stamp = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+  const id = (it && it.id) || '';
+  const link = 'obsidian://' + protocol + '?id=' + encodeURIComponent(id) + '&t=' + t;
+  const text = String((seg && seg.text) || '').replace(/\s+/g, ' ').trim();
+  const src = (feed && feed.title) || (it && it.title) || '';
+  return '- [' + stamp + '](' + link + ') ' + text + (src ? ' — ' + src : '') + '\n';
+}
+
+/** 跟读门控：开关关着，或分数达到 ok 档（70）才前进 */
+function shadowAdvance(score, gate) {
+  return !gate || Number(score) >= 70;
+}
+
 function hash(str) {
   let h = 5381;
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
@@ -439,6 +465,21 @@ function dropVideoOnly(items) {
   for (const i of out) { if ('videoOnly' in i) delete i.videoOnly; }
   return out;
 }
+/** RSS 抓取/解析失败的友好提示：把底层异常翻译成用户能懂、且知道下一步怎么做的话 */
+function friendlyFeedError(e, url) {
+  const raw = String((e && e.message) || e || '');
+  if (/解析失败|不是合法 XML|parsererror|not well-formed/i.test(raw)) {
+    return '这个地址返回的不是有效订阅内容（可能链接失效、需要登录或需要代理）。建议到「发现订阅」换一个标注「大陆可直连」的源，或稍后重试。';
+  }
+  if (/timeout|超时|ETIMEDOUT|ECONN|ENOTFOUND|network|fetch failed|Failed to fetch|getaddrinfo/i.test(raw)) {
+    return '网络连不上这个源（大陆访问可能受限）。换一个标注「大陆可直连」的源，或稍后重试即可。';
+  }
+  if (/40[134]|50[023]|status|unauthorized|forbidden/i.test(raw)) {
+    return '源站拒绝了访问（链接失效或限制访问）。建议换一个源。';
+  }
+  return '暂时读不到这个源，可能是网络或源站问题。可稍后重试，或到「发现订阅」换一个。';
+}
+
 function parseFeedXml(xml, feedUrl) {
   const doc = new DOMParser().parseFromString(xml, 'text/xml');
   if (doc.querySelector('parsererror')) throw new Error('RSS 解析失败（不是合法 XML）');
@@ -1113,7 +1154,7 @@ class EnglishReaderView extends ItemView {
       const menu = new Menu();
       menu.addItem((i) => i.setTitle('全部订阅').setIcon('layers').onClick(() => { this.feedId = 'all'; this.render(); }));
       for (const f of this.data.feeds) {
-        menu.addItem((i) => i.setTitle((f.kind === 'podcast' ? '🎧 ' : '📄 ') + (f.title || f.url)).onClick(() => { this.feedId = f.id; this.render(); }));
+        menu.addItem((i) => i.setTitle((f.error ? '⚠ ' : '') + (f.kind === 'podcast' ? '🎧 ' : '📄 ') + (f.title || f.url) + (f.error ? '（连不上）' : '')).onClick(() => { this.feedId = f.id; this.render(); }));
       }
       menu.showAtMouseEvent(ev);
     };
@@ -1379,6 +1420,7 @@ class EnglishReaderView extends ItemView {
       time.setText(fmtTime(audio.currentTime) + ' / ' + (it.duration || isFinite(audio.duration) ? fmtTime(it.duration || audio.duration) : '--:--'));
 
       if (this.maybeLoopSeg(audio)) return; // 这一拍刚跳回句首，不更新高亮避免闪烁
+      if (this.maybeAutoAdvance(audio)) return;
 
       // 学习时长：只累计正常播放的增量，拖进度条（跳变）不计
       const dt = this._lastTickT == null ? 0 : audio.currentTime - this._lastTickT;
@@ -1580,6 +1622,10 @@ class EnglishReaderView extends ItemView {
     });
     loopBtn.onclick = async () => {
       this.data.settings.loopSentence = !this.data.settings.loopSentence;
+      if (this.data.settings.loopSentence && this.data.settings.autoAdvance) {
+        this.data.settings.autoAdvance = false;
+        if (autoBtn) { autoBtn.setText('自动连播 ○'); autoBtn.removeClass('is-active'); }
+      }
       await this.plugin.save();
       const on = this.data.settings.loopSentence;
       this.loopIdx = on ? (this.curSeg >= 0 ? this.curSeg : 0) : -1;
@@ -1609,6 +1655,39 @@ class EnglishReaderView extends ItemView {
     pane.addEventListener('touchmove', markUserScroll, { passive: true });
     pane.addEventListener('mousedown', (ev) => { if (ev.target === pane) markUserScroll(); });
 
+    if (this.data.settings.segSearch !== false) {
+      const srow = pane.createDiv('er-seg-search-row');
+      const sinp = srow.createEl('input', {
+        cls: 'er-seg-search',
+        attr: { type: 'search', placeholder: '搜索本集字幕', title: '输入即过滤，回车跳到下一处命中' },
+      });
+      sinp.value = this._segQuery || '';
+      const scnt = srow.createSpan({ cls: 'er-seg-search-count', text: '' });
+      const runFilter = () => {
+        this._segQuery = (sinp.value || '').trim();
+        const n = this.applySegFilter();
+        scnt.setText(this._segQuery ? (n ? '命中 ' + n + ' 句' : '没有匹配') : '');
+      };
+      sinp.oninput = runFilter;
+      sinp.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); this.jumpToMatch(1); } };
+      if (this._segQuery) runFilter();
+    }
+    const autoBtn = info.createEl('button', {
+      cls: 'er-link-btn er-auto-btn' + (this.data.settings.autoAdvance ? ' is-active' : ''),
+      text: this.data.settings.autoAdvance ? '自动连播 ●' : '自动连播 ○',
+      attr: { title: '播完一句自动播下一句；单句循环与它互斥，跟读未达标时会停下' },
+    });
+    autoBtn.onclick = async () => {
+      await this.toggleAutoAdvance();
+      const on = this.data.settings.autoAdvance;
+      autoBtn.setText(on ? '自动连播 ●' : '自动连播 ○');
+      if (on) autoBtn.addClass('is-active'); else autoBtn.removeClass('is-active');
+      const lbtn = info.querySelector('.er-loop-btn');
+      if (lbtn) {
+        lbtn.setText(this.data.settings.loopSentence ? '单句循环 ●' : '单句循环 ○');
+        if (this.data.settings.loopSentence) lbtn.addClass('is-active'); else lbtn.removeClass('is-active');
+      }
+    };
     const list = pane.createDiv('er-segs');
     for (let i = 0; i < this.segs.length; i++) {
       const s = this.segs[i];
@@ -1625,6 +1704,8 @@ class EnglishReaderView extends ItemView {
       rec.onclick = (e) => { e.stopPropagation(); this.startRecording(s); };
       const flag = tools.createEl('button', { cls: 'er-mini er-flag-btn', attr: { title: '记入错题本' }, text: '⚑' });
       flag.onclick = (e) => { e.stopPropagation(); this.toggleMistake(i, s); };
+      const quote = tools.createEl('button', { cls: 'er-mini', attr: { title: '引用这句写进笔记（带时间点）' }, text: '引' });
+      quote.onclick = (e) => { e.stopPropagation(); this.quoteSegment(i); };
       const tr = tools.createEl('button', { cls: 'er-mini', attr: { title: '翻译这句' }, text: '译' });
       tr.onclick = async (e) => {
         e.stopPropagation();
@@ -1696,6 +1777,92 @@ class EnglishReaderView extends ItemView {
       this.updateSegProgress(idx);
       if (this.data.settings.autoScroll && this.isFollowing()) this.followCurrent(idx);
     }
+  }
+
+  /** 字幕内搜索：只隐藏不匹配行，不重建 DOM（输入框不会失焦） */
+  applySegFilter() {
+    const q = (this._segQuery || '').toLowerCase();
+    if (!this.segsEl) return 0;
+    let n = 0;
+    const rows = this.segsEl.querySelectorAll('.er-seg');
+    for (const row of rows) {
+      const seg = this.segs[Number(row.dataset.seg)];
+      const hay = String((seg && seg.text) || '').toLowerCase();
+      const hit = !q || hay.indexOf(q) >= 0;
+      if (hit && q) n++;
+      if (hit) row.removeClass('is-filtered-out'); else row.addClass('is-filtered-out');
+    }
+    return n;
+  }
+
+  /** 回车：从当前句往后找命中，到末尾再从头找 */
+  jumpToMatch(dir) {
+    const q = (this._segQuery || '').toLowerCase();
+    if (!q || !this.segsEl || !this.segs.length) return;
+    const rows = Array.from(this.segsEl.querySelectorAll('.er-seg'));
+    const cur = Math.max(0, this.curSeg || 0);
+    const order = [];
+    const step = dir > 0 ? 1 : -1;
+    for (let k = cur + step; k >= 0 && k < rows.length; k += step) order.push(k);
+    for (let k = dir > 0 ? 0 : rows.length - 1; k >= 0 && k < rows.length; k += step) {
+      if (dir > 0 ? k <= cur : k > cur) order.push(k);
+    }
+    for (const k of order) {
+      const row = rows[k];
+      if (!row || row.hasClass('is-filtered-out')) continue;
+      row.addClass('is-match-flash');
+      setTimeout(() => row.removeClass('is-match-flash'), 1200);
+      this.playSegmentAt(String(k));
+      return;
+    }
+  }
+
+  /** 自动连播：播到句尾进下一句。单句循环 / 跟读待评 / 录音中都不抢方向盘 */
+  maybeAutoAdvance(audio) {
+    if (!this.data.settings.autoAdvance || this.data.settings.loopSentence) return false;
+    if (this._shadowPending != null || this.recState === 'recording') return false;
+    const i = this.curSeg;
+    const seg = this.segs[i];
+    if (!seg || !(seg.end > seg.start)) return false;
+    const t = audio.currentTime;
+    if (t < seg.end - 0.12 || t > seg.end + 1.5) return false;
+    if (i + 1 >= this.segs.length) {
+      try { audio.pause(); } catch (e) { /* ignore */ }
+      return true;
+    }
+    this.stepSegment(1);
+    if (audio.paused) { try { const p = audio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* ignore */ } }
+    return true;
+  }
+
+  /** 自动连播开关：与单句循环互斥 */
+  async toggleAutoAdvance() {
+    this.data.settings.autoAdvance = !this.data.settings.autoAdvance;
+    if (this.data.settings.autoAdvance && this.data.settings.loopSentence) {
+      this.data.settings.loopSentence = false;
+      this.loopIdx = -1;
+    }
+    await this.plugin.save();
+    new Notice(this.data.settings.autoAdvance ? '已开启自动连播：播完自动下一句' : '已关闭自动连播');
+    return this.data.settings.autoAdvance;
+  }
+
+  /** 引用当前句：来源 + 集名 + 可点回跳的时间戳 */
+  async quoteSegment(idx) {
+    const seg = this.segs[idx];
+    if (!seg) return;
+    const found = this.currentItem();
+    const line = quoteLineFor(seg, found && found.it, found && found.feed, PROTOCOL);
+    const folder = this.data.settings.noteFolder || 'English';
+    await this.plugin.ensureFolder(folder);
+    const path = folder + '/' + QUOTE_FILE;
+    const adapter = this.plugin.app.vault.adapter;
+    if (!(await adapter.exists(path))) {
+      await adapter.write(path, '---\ntags: [' + QUOTE_TAG + ']\n---\n\n# ' + QUOTE_TITLE + '\n\n' + line);
+    } else {
+      await adapter.append(path, line);
+    }
+    new Notice(QUOTE_NOTICE);
   }
 
   /** 单句循环：播到本句结尾就跳回句首；返回是否发生了跳转 */
@@ -2197,15 +2364,27 @@ class EnglishReaderView extends ItemView {
     this.shadowError = '';
     this.shadowGrading = true;
     this.shadowFor = idx;
+    if (this.data.settings.shadowGate) this._shadowPending = idx;
     this.renderShadowScore();
     try {
       const res = await this.plugin.gradeShadow(relPath, refText);
       if (this.shadowFor !== idx) return;
       this.shadowResult = res;
       this.saveRecScore(idx, res.score);
+      if (this.data.settings.shadowGate && idx === this.curSeg) {
+        if (shadowAdvance(res.score, true)) {
+          this._shadowPending = null;
+          new Notice('跟读达标（' + res.score + ' 分），进入下一句');
+          this.stepSegment(1);
+        } else {
+          this._shadowPending = idx;
+          new Notice('这句还差一点（' + res.score + ' 分，需 70 分），再练一次');
+        }
+      }
     } catch (e) {
       if (this.shadowFor !== idx) return;
       this.shadowError = String((e && e.message) || e);
+      this._shadowPending = null;
     } finally {
       if (this.shadowFor === idx) {
         this.shadowGrading = false;
@@ -3305,6 +3484,56 @@ class StatModal extends Modal {
 /* ------------------------------------------------------------------ */
 /* 发现订阅                                                             */
 /* ------------------------------------------------------------------ */
+/** 首次使用引导：说明核心功能无需配置、逐句文本来源、可选增强在哪配 */
+class WelcomeModal extends Modal {
+  constructor(app, plugin, stats) {
+    super(app);
+    this.plugin = plugin;
+    this.stats = stats || { ok: 0, fail: 0, total: 0 };
+  }
+
+  onOpen() {
+    const el = this.contentEl;
+    el.empty();
+    const name = (this.plugin && this.plugin.manifest && this.plugin.manifest.name) || '菠萝精听';
+    el.createEl('h2', { text: '欢迎使用 ' + name });
+
+    el.createEl('p', {
+      text: '核心功能开箱即用：点开一篇就能逐句精听——单击播放、双击查词、单句循环、跟读打分，都不需要任何额外配置。',
+    });
+
+    const s = this.stats;
+    if (s.total) {
+      const msg = s.fail === 0
+        ? '已为你预置 ' + s.ok + ' 个学习源，现在就能开始听。'
+        : '已就绪 ' + s.ok + ' 个源；' + s.fail + ' 个源暂时连不上（大陆网络下很常见）。这不影响使用——点「发现订阅」挑标注「大陆可直连」的源即可。';
+      el.createEl('p', { cls: s.fail ? 'er-welcome-warn' : 'er-welcome-ok', text: msg });
+    }
+
+    el.createEl('h3', { text: '逐句文本从哪来？' });
+    const ul = el.createEl('ul');
+    ul.createEl('li', { text: '多数学习源自带文字稿，打开就逐句高亮，无需设置。' });
+    ul.createEl('li', { text: '没有字幕的节目，可以手动粘贴 SRT / VTT 字幕来做逐句精听。' });
+    ul.createEl('li', { text: '想要「自动转写」属于可选增强：需要本机 Python 环境，不是必需的。' });
+
+    el.createEl('h3', { text: '想开自动转写 / 跟读打分加速？' });
+    el.createEl('p', {
+      cls: 'er-hint',
+      text: '到 设置 → 第三方插件 → ' + name + '，顶部「可选增强状态」列出了缺什么、脚本放哪、路径怎么填。脚本在仓库 extras/ 目录，需手动放置，插件不会自动下载。核心功能不依赖它们。',
+    });
+
+    const row = el.createDiv('er-welcome-btns');
+    row.createEl('button', { cls: 'mod-cta', text: '开始使用' }).onclick = () => this.close();
+    const go = row.createEl('button', { text: '打开设置（可选）' });
+    go.onclick = () => {
+      this.close();
+      try { this.app.setting.open(); this.app.setting.openPluginById(this.plugin.manifest.id); } catch (e) { /* 兼容版本差异 */ }
+    };
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
 class DiscoverModal extends Modal {
   constructor(app, plugin, view) {
     super(app);
@@ -3472,6 +3701,30 @@ class EnglishReaderSettingTab extends PluginSettingTab {
       .setDesc('每篇文章会记住自己的速度')
       .addSlider((s) => s.setLimits(0.65, 1.75, 0.05).setValue(this.plugin.data.settings.defaultRate).setDynamicTooltip()
         .onChange(async (v) => { this.plugin.data.settings.defaultRate = v; await this.plugin.save(); }));
+
+    new Setting(containerEl)
+      .setName('自动连播')
+      .setDesc('播完一句自动播下一句；与单句循环互斥。纯听模式下生效，跟读时让位给评分。')
+      .addToggle((t) => t.setValue(this.plugin.data.settings.autoAdvance).onChange(async (v) => {
+        this.plugin.data.settings.autoAdvance = v;
+        if (v) this.plugin.data.settings.loopSentence = false;
+        await this.plugin.save();
+      }));
+
+    new Setting(containerEl)
+      .setName('跟读达标才进下一句')
+      .setDesc('开启后，点跟读录完评分低于 70 分会停在当前句重练；达标后自动进下一句。不点跟读、只听的时候不受影响。')
+      .addToggle((t) => t.setValue(this.plugin.data.settings.shadowGate).onChange(async (v) => {
+        this.plugin.data.settings.shadowGate = v;
+        await this.plugin.save();
+      }));
+
+    new Setting(containerEl)
+      .setName('字幕全文搜索')
+      .addToggle((t) => t.setValue(this.plugin.data.settings.segSearch !== false).onChange(async (v) => {
+        this.plugin.data.settings.segSearch = v;
+        await this.plugin.save();
+      }));
 
     new Setting(containerEl)
       .setName('字幕自动跟随滚动')
@@ -3650,6 +3903,22 @@ class EnglishReaderPlugin extends Plugin {
     setTimeout(() => { this.autoBackup(false).catch(() => {}); }, 4000);
 
     this.registerView(VIEW_TYPE, (leaf) => new EnglishReaderView(leaf, this));
+    this.registerObsidianProtocolHandler(PROTOCOL, async (params) => {
+      const id = params.id || '';
+      const t = Number(params.t || 0);
+      await this.activateView();
+      const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE) || [];
+      const v = leaves.length ? leaves[0].view : null;
+      if (!v) return;
+      if (id && v.itemId !== id) { try { await v.openItem(id); } catch (e) { /* ignore */ } }
+      setTimeout(() => {
+        const a = v.audioEl;
+        if (!a) return;
+        try { a.currentTime = t; } catch (e) { /* ignore */ }
+        if (typeof v.syncToTime === 'function') v.syncToTime(t, true);
+        if (a.paused) { try { const p = a.play(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* ignore */ } }
+      }, 400);
+    });
 
     this.addRibbonIcon('headphones', '打开菠萝英语精听', () => this.activateView());
 
@@ -3663,8 +3932,9 @@ class EnglishReaderPlugin extends Plugin {
       name: '刷新全部订阅',
       callback: async () => {
         new Notice('刷新中…');
-        await this.refreshAll();
-        new Notice('刷新完成');
+        const r = await this.refreshAll();
+        if (r && r.fail) new Notice('刷新完成：' + r.ok + ' 个成功，' + r.fail + ' 个连不上（多为大陆直连问题，可到「发现订阅」换源）', 9000);
+        else new Notice('刷新完成：' + ((r && r.ok) || 0) + ' 个源全部更新');
       },
     });
     this.addCommand({
@@ -3689,21 +3959,36 @@ class EnglishReaderPlugin extends Plugin {
     this.addCommand({ id: 'next-sentence', name: '下一句', callback: withView((v) => v.stepSegment(1)) });
     this.addCommand({ id: 'prev-sentence', name: '上一句', callback: withView((v) => v.stepSegment(-1)) });
     this.addCommand({ id: 'toggle-loop', name: '切换单句循环', callback: withView((v) => v.toggleLoop()) });
+    this.addCommand({ id: 'toggle-auto-advance', name: '切换自动连播', callback: withView((v) => v.toggleAutoAdvance()) });
 
     this.addSettingTab(new EnglishReaderSettingTab(this.app, this));
 
-    if (!this.data.settings.installedPresets) {
-      this.data.settings.installedPresets = true;
+    if (!this.data.settings.installedPresets || !this.data.settings.onboarded) {
+      const needPreset = !this.data.settings.installedPresets;
+      const needWelcome = !this.data.settings.onboarded;
+      if (needPreset) this.data.settings.installedPresets = true;
+      if (needWelcome) this.data.settings.onboarded = true;
       await this.save();
-      // 首次安装：后台只订阅 4 个核心源，不阻塞启动；其余在「发现订阅」里按需加
+      // 首次安装：后台只订阅核心源，失败静默（交给欢迎页统一说明）；其余在「发现订阅」里按需加
       setTimeout(async () => {
-        const first = PRESETS.filter((x) => CORE_TITLES.includes(x.title));
-        for (const p of first) {
-          await this.addFeed(p.url, p.title, p.kind, true, p.group).catch(() => {});
+        const appName = (this.manifest && this.manifest.name) || '菠萝精听';
+        let ok = 0, total = 0;
+        if (needPreset) {
+          const first = PRESETS.filter((x) => CORE_TITLES.includes(x.title));
+          total = first.length;
+          for (const p of first) {
+            if (await this.addFeed(p.url, p.title, p.kind, true, p.group).catch(() => false)) ok++;
+          }
+          const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+          leaves.forEach((l) => l.view && l.view.render && l.view.render());
+        } else {
+          total = this.data.feeds.length;
+          ok = total;
         }
-        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
-        leaves.forEach((l) => l.view && l.view.render && l.view.render());
-        new Notice('菠萝英语精听：已预置 ' + first.length + ' 个核心英语学习源');
+        if (needWelcome) {
+          try { new WelcomeModal(this.app, this, { ok, fail: Math.max(0, total - ok), total }).open(); }
+          catch (e) { new Notice(appName + '：已就绪。到「发现订阅」挑「大陆可直连」的源开始精听。', 12000); }
+        }
       }, 1500);
     }
   }
@@ -3778,7 +4063,7 @@ class EnglishReaderPlugin extends Plugin {
       items = dropVideoOnly(parsed.items);
       if (!kind) isPodcast = items.some((i) => i.audio);
     } catch (e) {
-      new Notice('添加失败：' + (e.message || e));
+      if (!silent) new Notice('添加失败：' + friendlyFeedError(e, url), 9000);
       return false;
     }
     const feed = {
@@ -3836,10 +4121,13 @@ class EnglishReaderPlugin extends Plugin {
 
   async refreshAll() {
     const feeds = this.data.feeds.slice();
+    let ok = 0;
+    let fail = 0;
     for (const f of feeds) {
-      await this.refreshFeed(f);
+      if (await this.refreshFeed(f)) ok++; else fail++;
     }
     await this.save();
+    return { ok, fail };
   }
 
   /* ---------- 逐字稿 ---------- */
@@ -5100,5 +5388,8 @@ module.exports.__statModal = StatModal;
 module.exports.__stats = { mistakeKey, statSeries, monthStat, heatmapWeeks };
 module.exports.__shadow = { scoreShadow, shadowTokens, lcsPairs };
 module.exports.__presets = PRESETS;
+module.exports.__friendlyFeedError = friendlyFeedError;
+module.exports.__welcomeModal = WelcomeModal;
 module.exports.__dropVideo = dropVideoOnly;
 module.exports.__optionalAddons = optionalAddons;
+module.exports.__quote = { quoteLineFor, shadowAdvance };

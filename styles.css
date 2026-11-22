@@ -422,6 +422,12 @@
   color: var(--er-muted);
 }
 .er-follow-btn { margin-left: 2px; }
+.er-auto-btn.is-active { color: var(--er-accent); font-weight: 600; }
+.er-seg-search-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.er-seg-search { flex: 1 1 auto; max-width: 46em; font-size: 12.5px; padding: 4px 8px; }
+.er-seg-search-count { font-size: 11px; color: var(--er-muted); white-space: nowrap; min-width: 62px; }
+.er-seg.is-filtered-out { display: none; }
+.er-seg.is-match-flash { background: var(--background-modifier-hover); box-shadow: inset 3px 0 0 var(--er-accent); }
 .er-loop-btn.is-active,
 .er-follow-btn.is-active {
   color: var(--er-accent);
@@ -1258,3 +1264,12 @@
   color: var(--text-muted);
   line-height: 1.5;
 }
+
+/* 首次使用引导 + 订阅失败提示 */
+.er-welcome h2 { margin-top: 0; }
+.er-welcome h3 { margin-bottom: 4px; }
+.er-welcome p { line-height: 1.7; }
+.er-welcome ul { padding-left: 20px; line-height: 1.8; }
+.er-welcome-ok { color: var(--text-success, var(--text-normal)); }
+.er-welcome-warn { color: var(--text-warning, var(--text-normal)); }
+.er-welcome-btns { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
