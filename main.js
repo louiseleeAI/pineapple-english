@@ -349,6 +349,167 @@ function heatmapWeeks(data, now = Date.now(), weeks = 12) {
   return cols;
 }
 
+/* ------------------------------------------------------------------ */
+/* 收听统计：生物钟 / 常听节目 / 小发现                                   */
+/* ------------------------------------------------------------------ */
+
+/** 近 N 个小时桶相加（生物钟用），缺的补 0 */
+function mergeHours(stats, now = Date.now(), days = 90) {
+  const out = new Array(24).fill(0);
+  const start = dayKey(now - (days - 1) * DAY_MS);
+  for (const k of Object.keys(stats || {})) {
+    if (k < start) continue;
+    const r = (stats || {})[k] || {};
+    if (!Array.isArray(r.hours)) continue;
+    for (let h = 0; h < 24; h++) out[h] += r.hours[h] || 0;
+  }
+  return out;
+}
+
+/** 按节目汇总收听秒数，返回前 N 名（节目名从 feeds 里找） */
+function topShows(stats, feeds, limit = 5) {
+  const map = new Map();
+  for (const k of Object.keys(stats || {})) {
+    const sh = ((stats || {})[k] || {}).shows;
+    if (!sh || typeof sh !== 'object') continue;
+    for (const fid of Object.keys(sh)) map.set(fid, (map.get(fid) || 0) + (sh[fid] || 0));
+  }
+  const list = [];
+  for (const [feedId, sec] of map) {
+    const f = (feeds || []).find((x) => x.id === feedId);
+    list.push({ feedId, title: f ? (f.title || f.url || '未命名节目') : '已取消订阅的源', sec });
+  }
+  list.sort((a, b) => b.sec - a.sec);
+  return list.slice(0, limit);
+}
+
+/** 24 小时里最常在哪个时段听，翻译成一句人话 */
+function clockLabel(hours) {
+  const arr = hours || [];
+  const total = arr.reduce((a, b) => a + (b || 0), 0);
+  if (!total) return '还没有收听记录，播一集就开始了';
+  let best = 0;
+  for (let i = 1; i < 24; i++) if ((arr[i] || 0) > (arr[best] || 0)) best = i;
+  const seg = best < 5 ? '夜航者' : best < 9 ? '晨读者' : best < 12 ? '上午型' : best < 14 ? '午间型'
+    : best < 18 ? '下午型' : best < 22 ? '晚读型' : '夜航者';
+  return '最常在 ' + best + ':00–' + ((best + 1) % 24) + ':00 听，你是' + seg;
+}
+
+/** 把分钟换算成几集节目 / 几趟京沪高铁 */
+function rideText(min) {
+  const m = Math.max(0, Math.round(min || 0));
+  if (m < 45) return '本月 ' + m + ' 分钟，积少成多';
+  if (m < 270) return '本月 ' + m + ' 分钟 ≈ ' + Math.round(m / 45) + ' 集 45 分钟的节目';
+  const trips = (m / 270).toFixed(1).replace(/\.0$/, '');
+  return '本月 ' + m + ' 分钟 ≈ 坐 ' + trips + ' 趟京沪高铁的时间';
+}
+
+/** 环形图单格路径（角度用弧度） */
+function ringSlice(cx, cy, r0, r1, a0, a1) {
+  const n = (v) => Math.round(v * 100) / 100;
+  const px = (r, a) => n(cx + r * Math.cos(a));
+  const py = (r, a) => n(cy + r * Math.sin(a));
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  return 'M' + px(r1, a0) + ' ' + py(r1, a0) +
+    'A' + r1 + ' ' + r1 + ' 0 ' + large + ' 1 ' + px(r1, a1) + ' ' + py(r1, a1) +
+    'L' + px(r0, a1) + ' ' + py(r0, a1) +
+    'A' + r0 + ' ' + r0 + ' 0 ' + large + ' 0 ' + px(r0, a0) + ' ' + py(r0, a0) + 'Z';
+}
+
+/** 小发现：把数字变成几句有人味的话 */
+function listenDiscoveries(stats, now = Date.now(), opts = {}) {
+  const o = opts || {};
+  const out = [];
+  let bestK = '';
+  let bestSec = 0;
+  for (const k of Object.keys(stats || {})) {
+    const sec = ((stats || {})[k] || {}).sec || 0;
+    if (sec > bestSec) { bestSec = sec; bestK = k; }
+  }
+  if (bestK && bestSec >= 60) {
+    const d = new Date(bestK + 'T00:00:00');
+    out.push({ k: '听得最久的一天', v: (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日，' + Math.round(bestSec / 60) + ' 分钟' });
+  }
+  let nightTitle = '';
+  let nightSec = 0;
+  for (const k of Object.keys(stats || {})) {
+    const n = ((stats || {})[k] || {}).night;
+    if (!n || typeof n !== 'object') continue;
+    for (const t of Object.keys(n)) if ((n[t] || 0) > nightSec) { nightSec = n[t]; nightTitle = t; }
+  }
+  if (nightTitle && nightSec >= 120) out.push({ k: '凌晨还在听', v: '《' + nightTitle + '》' });
+  for (const r of (o.repeats || []).filter((x) => x && x.n >= 2 && x.title).slice(0, 2)) {
+    out.push({ k: '听了不止一遍', v: '《' + r.title + '》听了 ' + r.n + ' 次' });
+  }
+  if ((o.shows || []).length >= 2) {
+    const a = o.shows[0];
+    const b = o.shows[o.shows.length - 1];
+    if (a.sec > b.sec * 1.5 && b.sec >= 60) {
+      out.push({ k: '老朋友和新欢', v: a.title + ' 花的时间最多，' + b.title + ' 是新开始听的' });
+    }
+  }
+  if (!out.length) out.push({ k: '还差一点', v: '多听几天，这里会自己长出你的收听习惯。' });
+  return out;
+}
+
+/** 24 小时环形图（SVG），中心写近 90 天总时长 */
+function renderClockRing(box, hours) {
+  box.createDiv({ cls: 'er-st-sec-title', text: '收听生物钟 · 近 90 天' });
+  const total = hours.reduce((a, b) => a + (b || 0), 0);
+  if (!total) {
+    box.createDiv({ cls: 'er-st-empty', text: '还没有收听记录，播一集这里就会长出你的作息。' });
+    return;
+  }
+  const wrap = box.createDiv('er-st-ring-wrap');
+  const ring = wrap.createDiv('er-st-ring');
+  const NS = 'http://www.w3.org/2000/svg';
+  const doc = ring.ownerDocument || document;
+  const svg = doc.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 200 200');
+  svg.setAttribute('role', 'img');
+  const max = Math.max.apply(null, hours);
+  for (let h = 0; h < 24; h++) {
+    const a0 = (h / 24) * Math.PI * 2 - Math.PI / 2;
+    const a1 = ((h + 1) / 24) * Math.PI * 2 - Math.PI / 2 - 0.012;
+    const path = doc.createElementNS(NS, 'path');
+    path.setAttribute('d', ringSlice(100, 100, 62, 88, a0, a1));
+    const t = max ? (hours[h] || 0) / max : 0;
+    path.setAttribute('fill', 'var(--interactive-accent)');
+    path.setAttribute('opacity', String(hours[h] ? (0.18 + 0.82 * t).toFixed(2) : '0.08'));
+    const tip = doc.createElementNS(NS, 'title');
+    tip.textContent = h + ':00–' + ((h + 1) % 24) + ':00 · ' + Math.round((hours[h] || 0) / 60) + ' 分钟';
+    path.appendChild(tip);
+    svg.appendChild(path);
+  }
+  const lbl = doc.createElementNS(NS, 'text');
+  lbl.setAttribute('x', '100');
+  lbl.setAttribute('y', '100');
+  lbl.setAttribute('text-anchor', 'middle');
+  lbl.setAttribute('font-size', '15');
+  lbl.setAttribute('fill', 'var(--text-normal)');
+  lbl.textContent = Math.round(total / 60) + ' 分';
+  svg.appendChild(lbl);
+  const sub = doc.createElementNS(NS, 'text');
+  sub.setAttribute('x', '100');
+  sub.setAttribute('y', '118');
+  sub.setAttribute('text-anchor', 'middle');
+  sub.setAttribute('font-size', '10');
+  sub.setAttribute('fill', 'var(--text-muted)');
+  sub.textContent = '近 90 天';
+  svg.appendChild(sub);
+  ring.appendChild(svg);
+
+  const note = wrap.createDiv('er-st-ring-note');
+  note.createDiv({ cls: 'er-st-ring-peak', text: clockLabel(hours) });
+  const part = (a, b) => hours.slice(a, b).reduce((x, y) => x + (y || 0), 0);
+  const morning = part(5, 12);
+  const noon = part(12, 18);
+  const night = part(18, 24) + part(0, 5);
+  const pct = (v) => Math.round(v / total * 100) + '%';
+  note.createDiv({ text: '早 5–12 点 ' + pct(morning) + ' · 午 12–18 点 ' + pct(noon) + ' · 晚 18–5 点 ' + pct(night) });
+  note.createDiv({ text: '只算真正在播放的时间，拖进度条不算。' });
+}
+
 function findSpeechBounds(data, sr, pad = 0.12) {
   if (!data || !data.length) return { start: 0, end: 0 };
   let peak = 0;
@@ -1194,6 +1355,7 @@ class EnglishReaderView extends ItemView {
       // 「已尝试」只用来防止同一次停留里反复重试；
       // 切走再切回来必须允许重新加载，否则会把已缓存的字幕挡掉。
       this._tried.delete(id);
+      this._playBumped = false;
     }
     this.itemId = id;
     this.plugin.markStudyItem(id);
@@ -1261,6 +1423,7 @@ class EnglishReaderView extends ItemView {
     if (it.duration) meta.createSpan({ text: ' · ' + fmtTime(it.duration) });
 
     this.plugin._currentSource = `${it.title} · ${feed.title}`;
+    this.plugin._playingItem = { id: it.id, feedId: feed.id, title: it.title, show: feed.title };
     if (it.audio) this.renderAudioBar(body, it, prevAudio);
 
     // 没有字幕就后台去取
@@ -1414,7 +1577,14 @@ class EnglishReaderView extends ItemView {
 
     playBtn.onclick = (e) => { e.stopPropagation(); this.togglePlay(); };
 
-    audio.onplay = () => { setIcon(playBtn, 'pause'); };
+    audio.onplay = () => {
+      setIcon(playBtn, 'pause');
+      if (!this._playBumped) {
+        this._playBumped = true;
+        const cur = this.plugin._playingItem;
+        if (cur && cur.id) this.plugin.bumpItemPlay(cur.id);
+      }
+    };
     audio.onpause = () => { setIcon(playBtn, 'play'); };
     audio.ontimeupdate = () => {
       time.setText(fmtTime(audio.currentTime) + ' / ' + (it.duration || isFinite(audio.duration) ? fmtTime(it.duration || audio.duration) : '--:--'));
@@ -1425,7 +1595,7 @@ class EnglishReaderView extends ItemView {
       // 学习时长：只累计正常播放的增量，拖进度条（跳变）不计
       const dt = this._lastTickT == null ? 0 : audio.currentTime - this._lastTickT;
       this._lastTickT = audio.currentTime;
-      if (!audio.paused && dt > 0 && dt < 3) this.plugin.addStudySeconds(dt);
+      if (!audio.paused && dt > 0 && dt < 3) this.plugin.addStudySeconds(dt, this.plugin._playingItem);
 
       this.syncToTime(audio.currentTime);
       this.persistPos(it.id, audio.currentTime);
@@ -3436,6 +3606,8 @@ class StatModal extends Modal {
     card(s.totalMinutes + ' 分', '累计时长', '只算真正播放的音频时间，拖进度条不算');
     card(s.activeDays, '学习天数', '当天满 1 分钟算一天');
 
+    if (s.monthMinutes > 0) contentEl.createDiv({ cls: 'er-st-ride', text: rideText(s.monthMinutes) });
+
     // 近 30 天柱状图
     const box = contentEl.createDiv('er-st-chart');
     box.createDiv({ cls: 'er-st-sec-title', text: '最近 30 天' });
@@ -3473,6 +3645,39 @@ class StatModal extends Modal {
     legend.createSpan({ text: '少' });
     for (let i = 0; i < 5; i++) legend.createSpan({ cls: 'er-st-heat-cell is-l' + i });
     legend.createSpan({ text: '多' });
+
+    // 收听生物钟（近 90 天小时桶）
+    const ins = this.plugin.listenInsights(now, 90);
+    const ringBox = contentEl.createDiv('er-st-chart');
+    renderClockRing(ringBox, ins.hours);
+
+    // 常听节目
+    const showBox = contentEl.createDiv('er-st-chart');
+    showBox.createDiv({ cls: 'er-st-sec-title', text: '你把时间给了谁 · 常听节目' });
+    if (!ins.shows.length) {
+      showBox.createDiv({ cls: 'er-st-empty', text: '还没有按节目统计的数据，听几集就有了。' });
+    } else {
+      const maxShow = Math.max.apply(null, ins.shows.map((x) => x.sec).concat([1]));
+      for (const sh of ins.shows) {
+        const row = showBox.createDiv('er-st-show');
+        row.createSpan({ cls: 'er-st-show-name', text: sh.title, attr: { title: sh.title } });
+        const track = row.createDiv('er-st-show-track');
+        const bar2 = track.createDiv('er-st-show-bar');
+        bar2.style.width = Math.max(4, Math.round(sh.sec / maxShow * 100)) + '%';
+        row.createSpan({ cls: 'er-st-show-val', text: Math.round(sh.sec / 60) + ' 分' });
+      }
+    }
+
+    // 小发现
+    if (ins.disc.length) {
+      const discBox = contentEl.createDiv('er-st-chart');
+      discBox.createDiv({ cls: 'er-st-sec-title', text: '小发现' });
+      for (const d of ins.disc) {
+        const row = discBox.createDiv('er-st-disc');
+        row.createSpan({ cls: 'er-st-disc-k', text: d.k });
+        row.createSpan({ cls: 'er-st-disc-v', text: d.v });
+      }
+    }
 
     const foot = contentEl.createDiv('er-st-foot');
     foot.setText('生词 ' + s.vocab + ' 个 · 其中易错 ' + s.hard + ' 个 · 错题本待过关 ' + s.mistakes + ' 句');
@@ -4009,6 +4214,7 @@ class EnglishReaderPlugin extends Plugin {
       vocab: raw.vocab || [],
       stats: raw.stats || {},
       mistakes: raw.mistakes || [],
+      replays: raw.replays || {},
     };
   }
 
@@ -4767,13 +4973,30 @@ class EnglishReaderPlugin extends Plugin {
   /* ---------- 学习记录 ---------- */
 
   /** 播放时累计秒数；dt 太大说明是拖进度条跳过去的，不计 */
-  addStudySeconds(dt) {
+  addStudySeconds(dt, meta) {
     if (!(dt > 0) || dt > 3) return;
-    const k = dayKey(Date.now());
+    const now = Date.now();
+    const k = dayKey(now);
     if (!this.data.stats) this.data.stats = {};
     const rec = this.data.stats[k] || { sec: 0, items: 0 };
     // 存浮点：timeupdate 的增量只有 0.25 秒左右，四舍五入会把它们全部抹成 0
     rec.sec = (rec.sec || 0) + dt;
+    // 收听生物钟：24 个小时桶
+    if (!Array.isArray(rec.hours)) rec.hours = new Array(24).fill(0);
+    const h = new Date(now).getHours();
+    rec.hours[h] = Math.round(((rec.hours[h] || 0) + dt) * 10) / 10;
+    // 常听节目：按订阅源累计
+    const fid = meta && meta.feedId;
+    if (fid) {
+      if (!rec.shows || typeof rec.shows !== 'object') rec.shows = {};
+      rec.shows[fid] = Math.round(((rec.shows[fid] || 0) + dt) * 10) / 10;
+    }
+    // 凌晨（0–5 点）还在听哪一集
+    const title = meta && meta.title;
+    if (title && h < 5) {
+      if (!rec.night || typeof rec.night !== 'object') rec.night = {};
+      rec.night[title] = Math.round(((rec.night[title] || 0) + dt) * 10) / 10;
+    }
     this.data.stats[k] = rec;
     this._statsDirty = true;
     this.scheduleSave();
@@ -4794,6 +5017,46 @@ class EnglishReaderPlugin extends Plugin {
     this._statsDirty = true;
     this.scheduleSave();
     this.flushStatsSoon();
+  }
+
+  /** 记一次「开始播放这一集」，用来算重复听 */
+  bumpItemPlay(id) {
+    if (!id) return;
+    if (!this.data.replays) this.data.replays = {};
+    const r = this.data.replays[id] || { n: 0, ts: 0 };
+    r.n = (r.n || 0) + 1;
+    r.ts = Date.now();
+    this.data.replays[id] = r;
+    const keys = Object.keys(this.data.replays);
+    if (keys.length > 1000) {
+      keys.sort((a, b) => ((this.data.replays[a] || {}).ts || 0) - ((this.data.replays[b] || {}).ts || 0));
+      for (const k of keys.slice(0, keys.length - 1000)) delete this.data.replays[k];
+    }
+    this.scheduleSave();
+  }
+
+  /** 按 id 找篇目标题（统计里显示用） */
+  itemTitleById(id) {
+    for (const fid of Object.keys(this.data.items || {})) {
+      const it = (this.data.items[fid] || []).find((x) => x.id === id);
+      if (it) return it.title || '';
+    }
+    return '';
+  }
+
+  /** 收听统计面板要用的生物钟 / 常听节目 / 小发现 */
+  listenInsights(now = Date.now(), days = 90) {
+    const stats = this.data.stats || {};
+    const hours = mergeHours(stats, now, days);
+    const shows = topShows(stats, this.data.feeds, 5);
+    const repeats = Object.keys(this.data.replays || {})
+      .map((id) => ({ id, n: ((this.data.replays || {})[id] || {}).n || 0 }))
+      .filter((x) => x.n >= 2)
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 3)
+      .map((x) => Object.assign({}, x, { title: this.itemTitleById(x.id) }));
+    const disc = listenDiscoveries(stats, now, { repeats, shows });
+    return { hours, shows, disc, days };
   }
 
   /** 攒一会儿再写文件，别每一秒都落盘 */
@@ -5386,6 +5649,7 @@ module.exports.__discoverModal = DiscoverModal;
 module.exports.__mistakeModal = MistakeModal;
 module.exports.__statModal = StatModal;
 module.exports.__stats = { mistakeKey, statSeries, monthStat, heatmapWeeks };
+module.exports.__listen = { mergeHours, topShows, listenDiscoveries, clockLabel, ringSlice, rideText, renderClockRing };
 module.exports.__shadow = { scoreShadow, shadowTokens, lcsPairs };
 module.exports.__presets = PRESETS;
 module.exports.__friendlyFeedError = friendlyFeedError;
