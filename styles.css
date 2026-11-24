@@ -1290,3 +1290,174 @@
 .er-st-disc-k { flex: 0 0 auto; color: var(--text-muted); }
 .er-st-disc-v { flex: 1 1 auto; color: var(--text-normal); }
 .er-st-empty { font-size: 12.5px; color: var(--text-muted); }
+
+
+/* ==================================================================
+   UI 第一批：视觉统一
+   只做覆盖、不改动上面的原有声明；如需回退，删除本段即可。
+   ================================================================== */
+.er-root {
+  --er-radius-sm: 6px;
+  --er-radius-lg: 12px;
+  --er-good: var(--color-green, #2e9e5f);
+  --er-warn: var(--color-yellow, #b8860b);
+  --er-bad: var(--color-red, #cf5c5c);
+  --er-card: var(--background-secondary-alt, var(--background-secondary));
+  --er-transition: 140ms ease;
+}
+
+/* 选中态：低饱和小卡片 + 2px 主色条，避免整行反色糊成一片 */
+.er-feed.is-active {
+  background: var(--background-primary);
+  border-radius: var(--er-radius-sm);
+  box-shadow: inset 2px 0 0 var(--er-accent);
+}
+.er-item.is-active {
+  background: var(--er-card);
+  border-radius: var(--er-radius-sm);
+  box-shadow: inset 2px 0 0 var(--er-accent);
+  border-left-color: transparent;
+}
+.er-item { border-radius: var(--er-radius-sm); }
+.er-item-title { font-size: 13px; -webkit-line-clamp: 2; }
+.er-item-meta,
+.er-item-top { font-size: 11px; }
+
+/* 订阅源：行高一致，计数与名字基线对齐 */
+.er-feed {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: var(--er-radius-sm);
+}
+.er-feed-name { font-size: 12.5px; }
+
+/* 字幕：行距放松、行内留白，当前句只留 2px 主色条 */
+.er-seg {
+  padding: 7px 10px;
+  line-height: 1.72;
+  border-radius: var(--er-radius-sm);
+  transition: background var(--er-transition);
+}
+.er-seg.is-playing { box-shadow: inset 2px 0 0 var(--er-accent); }
+.er-seg-time { padding-top: 5px; }
+
+/* 播放条：尺寸、倍速胶囊、控件间距统一 */
+.er-play { width: 32px; height: 32px; }
+.er-time { min-width: 92px; }
+.er-audio-ctrls { gap: 4px; }
+.er-rate {
+  height: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.er-toolbar { padding: 5px 10px; }
+.er-toolbar .er-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--er-radius-sm);
+}
+
+/* 卡片圆角统一到 12 */
+.er-whisper,
+.er-transcript-empty,
+.er-addons,
+.er-st-card { border-radius: var(--er-radius-lg); }
+
+/* 评分语义色：达标绿、待重练红 */
+.er-seg-badge.has-score { color: var(--er-good); }
+.er-seg-badge.is-hot {
+  background: var(--er-bad);
+  color: #fff;
+}
+
+/* 统计数字：等宽数字，卡片内边距统一 */
+.er-st-num { font-variant-numeric: tabular-nums; }
+.er-st-card { padding: 12px 8px; }
+.er-st-sec-title { letter-spacing: 0.2px; }
+
+/* 窄窗：收紧两栏宽度，避免标题被压成一条线 */
+@media (max-width: 900px) {
+  .er-side { width: 184px; min-width: 156px; }
+  .er-list { width: 254px; min-width: 200px; }
+}
+
+
+/* 本地转写 3 步引导（设置页） */
+.er-addons-help {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.er-addons-help-title { font-weight: 600; margin-bottom: 4px; }
+.er-addons-steps {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+.er-addons-steps li { margin: 2px 0; }
+.er-addons-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.er-addons-actions button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+  box-shadow: none;
+}
+.er-addons-actions button:hover {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+.er-asr-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: -4px 0 12px;
+  line-height: 1.7;
+}
+
+
+/* 盲听测试 */
+.er-blind { max-width: 520px; }
+.er-blind-head { margin-bottom: 4px; }
+.er-blind-title { font-size: 16px; font-weight: 600; }
+.er-blind-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.er-blind-dots { display: flex; gap: 6px; margin: 12px 0 16px; }
+.er-blind-dot {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--background-modifier-border);
+}
+.er-blind-dot.is-cur { background: var(--interactive-accent); opacity: 0.5; }
+.er-blind-dot.is-g { background: var(--color-green, #2e9e5f); }
+.er-blind-dot.is-h { background: var(--color-yellow, #b8860b); }
+.er-blind-dot.is-x { background: var(--color-red, #cf5c5c); }
+.er-blind-step { font-size: 18px; font-weight: 600; margin: 6px 0 4px; line-height: 1.4; }
+.er-blind-lead { line-height: 1.75; }
+.er-blind-hint { font-size: 12.5px; color: var(--text-muted); margin-bottom: 14px; }
+.er-blind-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.er-blind-judge { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.er-blind-judge button { flex: 1 1 100px; }
+.er-blind-judge button.is-g { border-color: var(--color-green, #2e9e5f); color: var(--color-green, #2e9e5f); }
+.er-blind-judge button.is-h { border-color: var(--color-yellow, #b8860b); color: var(--color-yellow, #b8860b); }
+.er-blind-judge button.is-x { border-color: var(--color-red, #cf5c5c); color: var(--color-red, #cf5c5c); }
+.er-blind-summary { margin-top: 8px; }
+.er-blind-score { font-size: 34px; font-weight: 700; line-height: 1.2; }
+.er-blind-text {
+  margin-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 10px;
+}
+.er-blind-line { font-size: 13.5px; line-height: 1.7; margin: 6px 0; color: var(--text-normal); }
+.er-st-note { font-size: 11.5px; color: var(--text-muted); margin-top: 8px; line-height: 1.6; }

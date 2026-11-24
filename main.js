@@ -452,6 +452,81 @@ function listenDiscoveries(stats, now = Date.now(), opts = {}) {
   return out;
 }
 
+/* ------------------------------------------------------------------ */
+/* 盲听测试：抽句、时长、按周理解度                                       */
+/* ------------------------------------------------------------------ */
+const BLIND_MIN_SEC = 1.2;
+const BLIND_MAX_SEC = 12;
+const BLIND_MIN_SENTENCES = 8;
+
+/** 一句的时长：有 end 用 end-start，否则按词数估（英文约 0.42 秒/词） */
+function segSpan(seg) {
+  const s = Number(seg && seg.start) || 0;
+  const e = Number(seg && seg.end) || 0;
+  if (e > s) return e - s;
+  const words = String((seg && seg.text) || '').trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(1.5, words * 0.42);
+}
+
+/** 抽 count 句：时长合适、互不相邻；池子不够就返回空数组 */
+function pickBlindSegs(segs, count, rand) {
+  const want = count || 3;
+  const rnd = rand || Math.random;
+  const pool = [];
+  for (let i = 0; i < (segs || []).length; i++) {
+    const span = segSpan(segs[i]);
+    if (span < BLIND_MIN_SEC || span > BLIND_MAX_SEC) continue;
+    pool.push(i);
+  }
+  if (pool.length < want) return [];
+  const picked = [];
+  for (let guard = 0; guard < 800 && picked.length < want; guard++) {
+    const i = pool[Math.floor(rnd() * pool.length)];
+    if (picked.indexOf(i) >= 0) continue;
+    if (picked.some((j) => Math.abs(j - i) < 2)) continue;
+    picked.push(i);
+  }
+  if (picked.length < want) return [];
+  picked.sort((a, b) => a - b);
+  return picked;
+}
+
+/** 理解度：听懂 = 1，半懂 = 0.5 */
+function blindRatio(row) {
+  const n = Number(row && row.n) || 0;
+  if (!n) return 0;
+  return ((Number(row.g) || 0) + 0.5 * (Number(row.h) || 0)) / n;
+}
+
+/** 近 N 周盲听理解度，周一为界 */
+function blindWeeks(stats, now, weeks) {
+  const nWeeks = weeks || 12;
+  const cur = new Date(now == null ? Date.now() : now);
+  const wd = (cur.getDay() + 6) % 7;
+  const startOfWeek = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() - wd).getTime();
+  const out = [];
+  for (let w = nWeeks - 1; w >= 0; w--) {
+    const wStart = startOfWeek - w * 7 * DAY_MS;
+    const wEnd = wStart + 7 * DAY_MS;
+    let n = 0;
+    let g = 0;
+    let h = 0;
+    let x = 0;
+    for (const k of Object.keys(stats || {})) {
+      const t = new Date(k + 'T00:00:00').getTime();
+      if (!(t >= wStart && t < wEnd)) continue;
+      const b = (stats[k] || {}).blind;
+      if (!b) continue;
+      n += b.n || 0;
+      g += b.g || 0;
+      h += b.h || 0;
+      x += b.x || 0;
+    }
+    out.push({ key: dayKey(wStart), n, g, h, x, ratio: n ? (g + 0.5 * h) / n : 0 });
+  }
+  return out;
+}
+
 /** 24 小时环形图（SVG），中心写近 90 天总时长 */
 function renderClockRing(box, hours) {
   box.createDiv({ cls: 'er-st-sec-title', text: '收听生物钟 · 近 90 天' });
@@ -3679,6 +3754,34 @@ class StatModal extends Modal {
       }
     }
 
+    // 耳朵的成长：盲听理解度（按周）
+    const bw = blindWeeks(this.plugin.data.stats, now, 12);
+    const bBox = contentEl.createDiv('er-st-chart');
+    const bHead = bBox.createDiv('er-st-head-row');
+    bHead.createDiv({ cls: 'er-st-sec-title', text: '耳朵的成长 · 不开字幕听懂多少' });
+    bHead.createEl('button', { cls: 'er-link-btn', text: '测一次' }).onclick = () => {
+      this.close();
+      this.plugin.startBlindTest();
+    };
+    const sampled = bw.reduce((n, w) => n + w.n, 0);
+    if (!sampled) {
+      bBox.createDiv({ cls: 'er-st-empty', text: '还没有盲听记录。点「测一次」：随机抽 3 句，关掉字幕听，再自评听懂多少。' });
+    } else {
+      const bBars = bBox.createDiv('er-st-bars');
+      for (const w of bw) {
+        const col = bBars.createDiv('er-st-bar-col');
+        const bar = col.createDiv('er-st-bar' + (w.n ? '' : ' is-zero'));
+        bar.style.height = (w.n ? Math.max(4, Math.round(w.ratio * 64)) : 2) + 'px';
+        bar.setAttribute('title', w.key + ' 那周 · '
+          + (w.n ? '理解度 ' + Math.round(w.ratio * 100) + '% · ' + w.n + ' 句' : '没测'));
+      }
+      bBars.createDiv({ cls: 'er-st-axis' }).setText('12 周前 → 本周');
+      bBox.createDiv({
+        cls: 'er-st-note',
+        text: '按自评算：听懂记 1、半懂记 0.5。样本少于 5 句的周只作参考。',
+      });
+    }
+
     const foot = contentEl.createDiv('er-st-foot');
     foot.setText('生词 ' + s.vocab + ' 个 · 其中易错 ' + s.hard + ' 个 · 错题本待过关 ' + s.mistakes + ' 句');
     const vocabBtn = foot.createEl('button', { cls: 'er-link-btn', text: '看生词' });
@@ -3690,6 +3793,169 @@ class StatModal extends Modal {
 /* 发现订阅                                                             */
 /* ------------------------------------------------------------------ */
 /** 首次使用引导：说明核心功能无需配置、逐句文本来源、可选增强在哪配 */
+/** 盲听测试弹窗：不显示任何字幕，只放声音，听完自评 */
+class BlindModal extends Modal {
+  constructor(app, plugin, item, segs, sample) {
+    super(app);
+    this.plugin = plugin;
+    this.item = item || {};
+    this.segs = segs || [];
+    this.picked = sample || [];
+    this.idx = 0;
+    this.results = [];
+    this.replayLeft = {};
+    this.phase = 'intro';
+    this.audio = null;
+    this.summary = null;
+    this.showText = false;
+  }
+
+  onOpen() {
+    this.contentEl.addClass('er-blind');
+    this.render();
+  }
+
+  onClose() {
+    this.stopAudio();
+    this.contentEl.empty();
+  }
+
+  stopAudio() {
+    if (!this.audio) return;
+    try { this.audio.pause(); } catch (e) { /* ignore */ }
+    if (this._onTick) {
+      try { this.audio.removeEventListener('timeupdate', this._onTick); } catch (e) { /* ignore */ }
+    }
+    this._onTick = null;
+  }
+
+  ensureAudio() {
+    if (!this.audio) {
+      this.audio = new Audio();
+      this.audio.preload = 'metadata';
+    }
+    return this.audio;
+  }
+
+  playCurrent() {
+    const segIdx = this.picked[this.idx];
+    const seg = this.segs[segIdx];
+    if (!seg) return;
+    if (!this.item.audio) { new Notice('这一集没有音频'); return; }
+    this.stopAudio();
+    const a = this.ensureAudio();
+    const start = Math.max(0, (Number(seg.start) || 0) - 0.15);
+    const stop = start + Math.max(0.8, segSpan(seg)) + 0.25;
+    a.src = this.item.audio;
+    try { a.currentTime = start; } catch (e) { /* ignore */ }
+    this._onTick = () => {
+      if (a.currentTime >= stop) {
+        try { a.pause(); } catch (e) { /* ignore */ }
+        if (this._onTick) a.removeEventListener('timeupdate', this._onTick);
+        this._onTick = null;
+        this.phase = 'judge';
+        this.render();
+      }
+    };
+    a.addEventListener('timeupdate', this._onTick);
+    const p = a.play();
+    if (p && p.catch) p.catch(() => new Notice('音频播放失败，检查网络或音频链接'));
+  }
+
+  judge(kind) {
+    if (kind !== 'skip') this.results.push(kind);
+    this.idx += 1;
+    if (this.idx >= this.picked.length) {
+      this.summary = this.plugin.recordBlind(this.item.id, this.results);
+      this.phase = 'done';
+      this.render();
+      return;
+    }
+    this.phase = 'play';
+    this.render();
+  }
+
+  render() {
+    const el = this.contentEl;
+    el.empty();
+    const head = el.createDiv('er-blind-head');
+    head.createDiv({ cls: 'er-blind-title', text: '盲听测试' });
+    head.createDiv({ cls: 'er-blind-sub', text: String(this.item.title || '').slice(0, 44) });
+
+    const dots = el.createDiv('er-blind-dots');
+    for (let i = 0; i < this.picked.length; i++) {
+      const r = this.results[i];
+      let cls = 'er-blind-dot';
+      if (r === 'g') cls += ' is-g';
+      else if (r === 'h') cls += ' is-h';
+      else if (r === 'x') cls += ' is-x';
+      else if (this.phase !== 'done' && i === this.idx) cls += ' is-cur';
+      dots.createDiv({ cls });
+    }
+
+    if (this.phase === 'intro') {
+      el.createEl('p', { cls: 'er-blind-lead', text: '随机抽 3 句，只放声音、不显示字幕。听完凭第一感觉自评，不必纠结每个词。' });
+      el.createEl('p', { cls: 'er-hint', text: '大约 40 秒。中途关掉不计入；同一集每天只记一次。' });
+      const row = el.createDiv('er-blind-actions');
+      row.createEl('button', { cls: 'mod-cta', text: '开始' }).onclick = () => { this.phase = 'play'; this.render(); };
+      row.createEl('button', { text: '取消' }).onclick = () => this.close();
+      return;
+    }
+
+    if (this.phase === 'play') {
+      el.createDiv({ cls: 'er-blind-step', text: '第 ' + (this.idx + 1) + ' / ' + this.picked.length + ' 句' });
+      el.createDiv({ cls: 'er-blind-hint', text: '字幕已隐藏，点下面播放。' });
+      const row = el.createDiv('er-blind-actions');
+      row.createEl('button', { cls: 'mod-cta', text: '播放这一句' }).onclick = () => this.playCurrent();
+      row.createEl('button', { text: '跳过这句' }).onclick = () => this.judge('skip');
+      return;
+    }
+
+    if (this.phase === 'judge') {
+      el.createDiv({ cls: 'er-blind-step', text: '刚才那句听懂了多少？' });
+      el.createDiv({ cls: 'er-blind-hint', text: '按第一感觉点，别回想文字。' });
+      const judgeRow = el.createDiv('er-blind-judge');
+      judgeRow.createEl('button', { cls: 'is-g', text: '听懂了' }).onclick = () => this.judge('g');
+      judgeRow.createEl('button', { cls: 'is-h', text: '半懂' }).onclick = () => this.judge('h');
+      judgeRow.createEl('button', { cls: 'is-x', text: '没懂' }).onclick = () => this.judge('x');
+      const row = el.createDiv('er-blind-actions');
+      if (!this.replayLeft[this.idx]) {
+        row.createEl('button', { text: '再听一遍（限 1 次）' }).onclick = () => {
+          this.replayLeft[this.idx] = 1;
+          this.phase = 'play';
+          this.render();
+          this.playCurrent();
+        };
+      }
+      row.createEl('button', { text: '跳过这句' }).onclick = () => this.judge('skip');
+      return;
+    }
+
+    const s = this.summary;
+    const box = el.createDiv('er-blind-summary');
+    if (!s) {
+      box.createDiv({ cls: 'er-blind-score', text: '未计入' });
+      box.createDiv({ cls: 'er-hint', text: '有效作答不足 2 句，本次不记录。' });
+    } else {
+      box.createDiv({ cls: 'er-blind-score', text: Math.round(blindRatio(s) * 100) + '%' });
+      box.createDiv({ cls: 'er-hint', text: '本次 ' + s.n + ' 句：听懂 ' + s.g + ' · 半懂 ' + s.h + ' · 没懂 ' + s.x });
+    }
+    const row = el.createDiv('er-blind-actions');
+    row.createEl('button', { text: this.showText ? '收起原文' : '看这三句原文' }).onclick = () => {
+      this.showText = !this.showText;
+      this.render();
+    };
+    row.createEl('button', { cls: 'mod-cta', text: '完成' }).onclick = () => this.close();
+
+    if (this.showText) {
+      const list = el.createDiv('er-blind-text');
+      for (const i of this.picked) {
+        list.createDiv({ cls: 'er-blind-line', text: String((this.segs[i] && this.segs[i].text) || '') });
+      }
+    }
+  }
+}
+
 class WelcomeModal extends Modal {
   constructor(app, plugin, stats) {
     super(app);
@@ -3724,7 +3990,8 @@ class WelcomeModal extends Modal {
     el.createEl('h3', { text: '想开自动转写 / 跟读打分加速？' });
     el.createEl('p', {
       cls: 'er-hint',
-      text: '到 设置 → 第三方插件 → ' + name + '，顶部「可选增强状态」列出了缺什么、脚本放哪、路径怎么填。脚本在仓库 extras/ 目录，需手动放置，插件不会自动下载。核心功能不依赖它们。',
+      text: '到 设置 → 第三方插件 → ' + name + '，最上面的「可选增强状态」里有 3 步配置：装依赖、放脚本、下模型，' +
+            '每步都带「复制命令」「下载脚本」「模型下载页」按钮，照着点完再点一次「检测」就行。不想配也完全不影响使用。',
     });
 
     const row = el.createDiv('er-welcome-btns');
@@ -3849,6 +4116,20 @@ function optionalAddons(plugin) {
   return out;
 }
 
+/** 本地转写 3 步配置：设置页与欢迎页共用一份文案，避免两处走样 */
+const ASR_SETUP = {
+  pip: 'pip install faster-whisper',
+  dlLabel: '下载 transcribe.py',
+  dlUrl: 'https://raw.githubusercontent.com/louiseleeAI/pineapple-english/main/extras/transcribe.py',
+  mdlLabel: '模型下载页',
+  mdlUrl: 'https://huggingface.co/Systran/faster-whisper-base.en/tree/main',
+  steps: [
+    '① 装依赖：命令行执行 pip install faster-whisper（Python 3.10+，建议建独立虚拟环境）。',
+    '② 放脚本：点「下载 transcribe.py」，存到任意文件夹，把该文件夹路径填进「转写脚本目录」。',
+    '③ 下模型：base.en 约 145MB。点「模型下载页」手动下载，把含 model.bin 的文件夹填进「模型目录」；首次转写也会尝试自动下载。'
+  ],
+};
+
 class EnglishReaderSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -3876,6 +4157,32 @@ class EnglishReaderSettingTab extends PluginSettingTab {
       text: '核心功能不依赖以上任何文件。市场安装只含 main.js / manifest.json / styles.css；' +
             '需要增强时从仓库 extras/ 手动放置脚本并在下方填路径，插件不会自动下载或安装依赖。',
     });
+    if (!add.asrConfigured) {
+      const help = addBox.createEl('div', { cls: 'er-addons-help' });
+      help.createEl('div', { cls: 'er-addons-help-title', text: '本地转写怎么配（3 步，可选）' });
+      const ol = help.createEl('ol', { cls: 'er-addons-steps' });
+      for (const s of ASR_SETUP.steps) ol.createEl('li', { text: s });
+      const act = help.createEl('div', { cls: 'er-addons-actions' });
+      const cp = act.createEl('button', { text: '复制安装命令' });
+      cp.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(ASR_SETUP.pip);
+          new Notice('已复制：' + ASR_SETUP.pip);
+        } catch (e) {
+          new Notice('复制失败，手动输入：' + ASR_SETUP.pip, 8000);
+        }
+      };
+      const dl = act.createEl('button', { text: ASR_SETUP.dlLabel });
+      dl.onclick = () => window.open(ASR_SETUP.dlUrl, '_blank');
+      const md = act.createEl('button', { text: ASR_SETUP.mdlLabel });
+      md.onclick = () => window.open(ASR_SETUP.mdlUrl, '_blank');
+      const jump = act.createEl('button', { text: '跳到下面的路径设置' });
+      jump.onclick = () => {
+        const h = containerEl.querySelector('h3.er-asr-head');
+        if (h && h.scrollIntoView) h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+    }
+
 
     new Setting(containerEl)
       .setName('笔记存放文件夹')
@@ -3949,10 +4256,14 @@ class EnglishReaderSettingTab extends PluginSettingTab {
       .addSlider((s) => s.setLimits(10, 100, 10).setValue(this.plugin.data.settings.maxItemsPerFeed).setDynamicTooltip()
         .onChange(async (v) => { this.plugin.data.settings.maxItemsPerFeed = v; await this.plugin.save(); }));
 
-    containerEl.createEl('h3', { text: '本地转写（faster-whisper，免费离线）' });
+        const asrHead = containerEl.createEl('h3', { text: '本地转写（faster-whisper，免费离线）', cls: 'er-asr-head' });
+    containerEl.createEl('div', {
+      cls: 'er-asr-note',
+      text: '不想配也能用：没有字幕的节目，手动粘贴 SRT/VTT 即可逐句精听。想自动转写再按上面的 3 步配，配完点「检测」验证。',
+    });
     new Setting(containerEl)
       .setName('转写脚本目录')
-      .setDesc('存放 transcribe.py 的文件夹')
+      .setDesc('存放 transcribe.py 的文件夹。例：D:/asr（不确定就留空，不影响手动粘贴字幕）')
       .addText((t) => t.setValue(this.plugin.data.settings.whisperDir).onChange(async (v) => {
         this.plugin.data.settings.whisperDir = v.trim();
         await this.plugin.save();
@@ -3960,7 +4271,7 @@ class EnglishReaderSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Python 解释器')
-      .setDesc('指向装了 faster-whisper 的 python.exe（独立环境，不影响系统 Python）')
+      .setDesc('装了 faster-whisper 的 python.exe。例：D:/asr/.venv/Scripts/python.exe')
       .addText((t) => t.setValue(this.plugin.data.settings.whisperPython).onChange(async (v) => {
         this.plugin.data.settings.whisperPython = v.trim();
         await this.plugin.save();
@@ -3968,7 +4279,7 @@ class EnglishReaderSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('模型目录')
-      .setDesc('含 model.bin 的模型文件夹。base.en 约 145MB，准确度够用')
+      .setDesc('含 model.bin 的文件夹。例：D:/asr/models/base.en（base.en 约 145MB）')
       .addText((t) => t.setValue(this.plugin.data.settings.whisperModelDir).onChange(async (v) => {
         this.plugin.data.settings.whisperModelDir = v.trim();
         await this.plugin.save();
@@ -4165,6 +4476,7 @@ class EnglishReaderPlugin extends Plugin {
     this.addCommand({ id: 'prev-sentence', name: '上一句', callback: withView((v) => v.stepSegment(-1)) });
     this.addCommand({ id: 'toggle-loop', name: '切换单句循环', callback: withView((v) => v.toggleLoop()) });
     this.addCommand({ id: 'toggle-auto-advance', name: '切换自动连播', callback: withView((v) => v.toggleAutoAdvance()) });
+    this.addCommand({ id: 'blind-test', name: '盲听测试：当前这一集（3 句）', callback: withView(() => this.startBlindTest()) });
 
     this.addSettingTab(new EnglishReaderSettingTab(this.app, this));
 
@@ -5059,6 +5371,54 @@ class EnglishReaderPlugin extends Plugin {
     return { hours, shows, disc, days };
   }
 
+  /** 记录一次盲听；有效作答少于 2 句不记 */
+  recordBlind(itemId, results) {
+    const valid = (results || []).filter((r) => r === 'g' || r === 'h' || r === 'x');
+    if (valid.length < 2) return null;
+    const k = dayKey(Date.now());
+    if (!this.data.stats) this.data.stats = {};
+    const rec = this.data.stats[k] || { sec: 0, items: 0 };
+    if (!rec.blind) rec.blind = { n: 0, g: 0, h: 0, x: 0 };
+    rec.blind.n += valid.length;
+    rec.blind.g += valid.filter((r) => r === 'g').length;
+    rec.blind.h += valid.filter((r) => r === 'h').length;
+    rec.blind.x += valid.filter((r) => r === 'x').length;
+    if (itemId) {
+      if (!rec.blindSeen) rec.blindSeen = {};
+      rec.blindSeen[itemId] = 1;
+    }
+    this.data.stats[k] = rec;
+    this._statsDirty = true;
+    this.scheduleSave();
+    this.flushStatsSoon();
+    return { n: valid.length, g: rec.blind.g, h: rec.blind.h, x: rec.blind.x };
+  }
+
+  blindDoneToday(itemId) {
+    const rec = (this.data.stats || {})[dayKey(Date.now())];
+    return !!(rec && rec.blindSeen && itemId && rec.blindSeen[itemId]);
+  }
+
+  /** 从统计面板或命令面板发起盲听 */
+  startBlindTest() {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE) || [];
+    const v = leaves.length ? leaves[0].view : null;
+    if (!v) { new Notice('先打开菠萝精听面板，并选一集'); return; }
+    const found = v.currentItem ? v.currentItem() : null;
+    if (!found) { new Notice('先在左侧选一集'); return; }
+    const it = found.it || {};
+    if (!it.audio) { new Notice('这一集没有音频，没法盲听'); return; }
+    const timed = !!(v.transcriptInfo && v.transcriptInfo.timed) || v.estimateOn;
+    if (!timed) { new Notice('这集没有时间轴：先点「按句长估算时间轴」再测'); return; }
+    const segs = v.segs || [];
+    if (segs.length < BLIND_MIN_SENTENCES) { new Notice('这集句子太少（不到 8 句），换一集再测'); return; }
+    if (this.blindDoneToday(it.id)) { new Notice('这一集今天已经测过了，换一集或明天再来'); return; }
+    const sample = pickBlindSegs(segs, 3);
+    if (!sample.length) { new Notice('合适的句子不够，换一集试试'); return; }
+    new BlindModal(this.app, this, it, segs, sample).open();
+  }
+
+
   /** 攒一会儿再写文件，别每一秒都落盘 */
   flushStatsSoon() {
     if (!this._statsDirty) return;
@@ -5650,6 +6010,9 @@ module.exports.__mistakeModal = MistakeModal;
 module.exports.__statModal = StatModal;
 module.exports.__stats = { mistakeKey, statSeries, monthStat, heatmapWeeks };
 module.exports.__listen = { mergeHours, topShows, listenDiscoveries, clockLabel, ringSlice, rideText, renderClockRing };
+module.exports.__asrSetup = ASR_SETUP;
+module.exports.__blind = { pickBlindSegs, segSpan, blindRatio, blindWeeks, BLIND_MIN_SENTENCES };
+module.exports.__blindModal = BlindModal;
 module.exports.__shadow = { scoreShadow, shadowTokens, lcsPairs };
 module.exports.__presets = PRESETS;
 module.exports.__friendlyFeedError = friendlyFeedError;
