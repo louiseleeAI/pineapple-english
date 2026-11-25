@@ -1461,3 +1461,7 @@
 }
 .er-blind-line { font-size: 13.5px; line-height: 1.7; margin: 6px 0; color: var(--text-normal); }
 .er-st-note { font-size: 11.5px; color: var(--text-muted); margin-top: 8px; line-height: 1.6; }
+
+/* 1.4.1：统计标题行与按钮不再挤在一起 */
+.er-st-head-row { gap: 12px; }
+.er-st-head-row .er-link-btn { flex: 0 0 auto; white-space: nowrap; }

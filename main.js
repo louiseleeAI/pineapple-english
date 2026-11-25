@@ -3938,7 +3938,12 @@ class BlindModal extends Modal {
       box.createDiv({ cls: 'er-hint', text: '有效作答不足 2 句，本次不记录。' });
     } else {
       box.createDiv({ cls: 'er-blind-score', text: Math.round(blindRatio(s) * 100) + '%' });
-      box.createDiv({ cls: 'er-hint', text: '本次 ' + s.n + ' 句：听懂 ' + s.g + ' · 半懂 ' + s.h + ' · 没懂 ' + s.x });
+      const skipped = this.picked.length - s.n;
+      box.createDiv({
+        cls: 'er-hint',
+        text: '本次 ' + s.n + ' 句：听懂 ' + s.g + ' · 半懂 ' + s.h + ' · 没懂 ' + s.x
+          + (skipped > 0 ? '（跳过 ' + skipped + ' 句，未计入）' : ''),
+      });
     }
     const row = el.createDiv('er-blind-actions');
     row.createEl('button', { text: this.showText ? '收起原文' : '看这三句原文' }).onclick = () => {
