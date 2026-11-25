@@ -4,6 +4,20 @@
 
 一边听一边看逐句字幕：**点哪句播哪句**、单句循环、双击查词、跟读录音，听完的句子进错题本，生词按间隔重复复习，每天的学习时长自动记进打卡日历。音频、字幕、录音、笔记全部留在你的库里。
 
+## English summary
+
+Pineapple English Listening turns Obsidian into a sentence-by-sentence podcast reader for English learners.
+
+- **Install**: Settings → Community plugins → Browse → search `Pineapple English Listening` → Install → Enable, then click the ribbon icon.
+- **Listen**: click any sentence to play from there; single-sentence loop, 0.65x–1.75x speed, auto-advance, and transcript search.
+- **Study**: double-click a word for its definition, add it to a spaced-repetition list, flag sentences into a mistake notebook, and record yourself for a coverage score.
+- **Notes**: save an episode as a structured reading note, or quote a sentence into your note with a clickable timestamp.
+- **Stats**: streak, monthly minutes, 12-week heatmap, listening clock, top shows, and a blind-listening comprehension check.
+- **Transcripts**: many feeds ship with transcripts; otherwise paste SRT/VTT, or set up optional local ASR (faster-whisper) — Settings → Optional add-ons → three steps with copy/download buttons.
+- **Privacy**: feeds, transcripts, stats, recordings and notes stay in your vault. No telemetry, no account. Network access is only used to fetch feeds, audio and transcripts; if you configure an external TTS, that request goes to that service.
+
+Desktop only (local Python is used for ASR and recording).
+
 ## 装法
 
 **推荐：社区插件市场** —— Obsidian → 设置 → 第三方插件 → 浏览 → 搜 `Pineapple English Listening` → 安装并启用。首次审核通过、目录同步后即可搜到；在此之前可用下面的手动安装，或用 BRAT 填仓库地址公测。
