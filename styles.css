@@ -1465,3 +1465,27 @@
 /* 1.4.1：统计标题行与按钮不再挤在一起 */
 .er-st-head-row { gap: 12px; }
 .er-st-head-row .er-link-btn { flex: 0 0 auto; white-space: nowrap; }
+
+
+/* ===== 一键安装本地转写向导 ===== */
+.er-addons-quick {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--background-primary);
+  border: 1px solid var(--interactive-accent);
+}
+.er-addons-quick-title { font-weight: 600; margin-bottom: 8px; }
+.er-install-btn { min-width: 160px; }
+.er-wizard { min-width: 440px; max-width: 600px; }
+.er-wizard-lead { color: var(--text-muted); line-height: 1.7; }
+.er-wizard-status { font-weight: 600; margin: 12px 0 8px; min-height: 20px; }
+.er-wizard-bar { height: 6px; border-radius: 3px; background: var(--background-modifier-border); overflow: hidden; margin-bottom: 12px; }
+.er-wizard-bar-fill { height: 100%; width: 0%; background: var(--interactive-accent); transition: width 200ms ease; }
+.er-wizard-log {
+  max-height: 220px; overflow-y: auto; font-family: var(--font-monospace);
+  font-size: 11px; line-height: 1.55; color: var(--text-muted);
+  background: var(--background-secondary); border-radius: 6px; padding: 8px 10px;
+}
+.er-wizard-line { white-space: pre-wrap; word-break: break-all; }
+.er-wizard-btns { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }

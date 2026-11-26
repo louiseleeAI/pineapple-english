@@ -82,7 +82,13 @@ Desktop only (local Python is used for ASR and recording).
 
 ## 本地转写（可选）
 
-设置页最上面的「可选增强状态」里有 **3 步配置**，每步都带按钮（复制安装命令 / 下载脚本 / 模型下载页），照着点完再点一次「检测」。手动做也可以：
+**最简单：一键安装。** 到 `设置 → 第三方插件 → 菠萝英语精听`，点最上面的「**一键安装本地转写**」，插件会在本机依次完成：检测 Python → 建独立虚拟环境 → 用清华源装 `faster-whisper` → 写入转写脚本 → 下载 base.en 模型（约 145MB，走 hf-mirror）→ 自动填好三个路径并检测。全程有进度条，不上传任何音频或笔记。装完对没字幕的节目点「本地转写这一集」即可。
+
+命令面板里搜「一键安装本地转写」也能直接打开向导。
+
+需要本机先装 Python 3（[python.org](https://www.python.org/downloads/)，安装时勾选 Add Python to PATH）。没有 Python 时向导会提示，装完再点开始。安装完成后文件都在插件目录下 `asr/`（`.venv/` + `model/`），不会进笔记、不会被提交。
+
+手动配置也可以（适合已有 Python 环境的用户）：
 
 1. **装依赖**：`pip install faster-whisper`（Python 3.10+，建议独立虚拟环境）
 2. **放脚本**：下载 [extras/transcribe.py](https://raw.githubusercontent.com/louiseleeAI/pineapple-english/main/extras/transcribe.py)，存到任意文件夹

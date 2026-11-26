@@ -16,11 +16,19 @@ cache/
 dist/
 *.zip
 
+# 一键安装的本地运行环境（含 .venv 与模型，体积大且不入库）
+asr/
+*.part
+
 # Python 可选增强的运行产物
 __pycache__/
 *.pyc
 *.onnx
+*.bin
 tokens.txt
+model.bin
+tokenizer.json
+vocabulary.txt
 temp/
 
 # 编辑器 / 依赖

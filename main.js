@@ -3995,8 +3995,7 @@ class WelcomeModal extends Modal {
     el.createEl('h3', { text: '想开自动转写 / 跟读打分加速？' });
     el.createEl('p', {
       cls: 'er-hint',
-      text: '到 设置 → 第三方插件 → ' + name + '，最上面的「可选增强状态」里有 3 步配置：装依赖、放脚本、下模型，' +
-            '每步都带「复制命令」「下载脚本」「模型下载页」按钮，照着点完再点一次「检测」就行。不想配也完全不影响使用。',
+      text: '最简单：到 设置 → 第三方插件 → ' + name + '，点最上面的「一键安装本地转写」，插件会自动装好依赖、脚本和模型，全程在本机完成。不想配也完全不影响使用。',
     });
 
     const row = el.createDiv('er-welcome-btns');
@@ -4135,6 +4134,242 @@ const ASR_SETUP = {
   ],
 };
 
+/* ==================================================================
+   一键安装本地转写（英语版 · faster-whisper）
+   社区市场只装三件套，故脚本以字符串内嵌；安装器在本机建 venv、
+   装依赖、下载模型并自动填好设置，全程不上传任何数据。
+   ================================================================== */
+/* >>> ASR_WIZARD_BEGIN */
+const ASR_WIZARD = {
+  pipIndex: 'https://pypi.tuna.tsinghua.edu.cn/simple',
+  pkgs: 'faster-whisper',
+  modelRepo: 'Systran/faster-whisper-base.en',
+  modelFiles: [
+    ['config.json', 2227, 'config.json'],
+    ['tokenizer.json', 2128466, 'tokenizer.json'],
+    ['vocabulary.txt', 422309, 'vocabulary.txt'],
+    ['model.bin', 145216508, 'model.bin'],
+  ],
+  mirrorBases: [
+    'https://hf-mirror.com/',
+    'https://huggingface.co/',
+  ],
+  // transcribe.py 内嵌副本（与 extras/transcribe.py 一致）
+  script: "\"\"\"\nEnglish Reader \u2014 \u672c\u5730\u8f6c\u5199\u811a\u672c\uff08faster-whisper\uff09\n\n\u7528\u6cd5:\n    python transcribe.py <\u97f3\u9891\u8def\u5f84> <\u8f93\u51faSRT\u8def\u5f84> <\u6a21\u578b\u76ee\u5f55> [\u7ebf\u7a0b\u6570]\n\n\u8f93\u51fa:\n    stdout \u6bcf\u884c PROGRESS <0-100> \u8868\u793a\u8fdb\u5ea6\uff0c\u6700\u540e\u8f93\u51fa DONE <\u53e5\u6570>\n    \u5931\u8d25\u65f6 stderr \u8f93\u51fa\u9519\u8bef\u5e76\u8fd4\u56de\u975e 0\n\"\"\"\nimport sys\nimport os\nimport time\n\ndef fmt_ts(sec):\n    if sec < 0:\n        sec = 0\n    ms = int(round(sec * 1000))\n    h, ms = divmod(ms, 3600000)\n    m, ms = divmod(ms, 60000)\n    s, ms = divmod(ms, 1000)\n    return \"%02d:%02d:%02d,%03d\" % (h, m, s, ms)\n\ndef main():\n    if len(sys.argv) < 4:\n        sys.stderr.write(\"usage: transcribe.py <audio> <out.srt> <model_dir> [threads]\\n\")\n        return 2\n\n    audio = sys.argv[1]\n    out_srt = sys.argv[2]\n    model_dir = sys.argv[3]\n    threads = int(sys.argv[4]) if len(sys.argv) > 4 else 8\n\n    if not os.path.exists(audio):\n        sys.stderr.write(\"audio not found: %s\\n\" % audio)\n        return 3\n    if not os.path.isdir(model_dir):\n        sys.stderr.write(\"model dir not found: %s\\n\" % model_dir)\n        return 4\n\n    # \u79bb\u7ebf\u6a21\u5f0f\uff1a\u7981\u6b62\u8054\u7f51\u627e\u6a21\u578b\n    os.environ.setdefault(\"HF_HUB_OFFLINE\", \"1\")\n    os.environ.setdefault(\"TRANSFORMERS_OFFLINE\", \"1\")\n\n    from faster_whisper import WhisperModel\n\n    t0 = time.time()\n    model = WhisperModel(\n        model_dir,\n        device=\"cpu\",\n        compute_type=\"int8\",\n        cpu_threads=threads,\n        num_workers=1,\n    )\n    segments, info = model.transcribe(\n        audio,\n        language=\"en\",\n        beam_size=1,\n        vad_filter=True,\n        vad_parameters=dict(min_silence_duration_ms=500),\n        condition_on_previous_text=False,\n    )\n\n    total = float(getattr(info, \"duration\", 0) or 0)\n    sys.stdout.write(\"TOTAL %.2f\\n\" % total)\n    sys.stdout.flush()\n\n    lines = []\n    n = 0\n    last_pct = -1\n    for seg in segments:\n        n += 1\n        text = (seg.text or \"\").strip()\n        if text:\n            lines.append(\n                \"%d\\n%s --> %s\\n%s\\n\" % (n, fmt_ts(seg.start), fmt_ts(seg.end), text)\n            )\n        if total > 0:\n            pct = min(99, int(seg.end / total * 100))\n            if pct != last_pct:\n                last_pct = pct\n                sys.stdout.write(\"PROGRESS %d\\n\" % pct)\n                sys.stdout.flush()\n\n    with open(out_srt, \"w\", encoding=\"utf-8\") as f:\n        f.write(\"\\n\".join(lines))\n\n    sys.stdout.write(\"PROGRESS 100\\n\")\n    sys.stdout.write(\"DONE %d %.1f\\n\" % (len(lines), time.time() - t0))\n    sys.stdout.flush()\n    return 0\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n",
+};
+
+function asrWizardUrl(file) {
+  return ASR_WIZARD.mirrorBases[0] + ASR_WIZARD.modelRepo + '/resolve/main/' + file;
+}
+
+/** 探测可用 Python：返回 {exe, version} 或 null。优先系统 PATH，再试 py -3。 */
+function asrWizardDetectPython() {
+  const { spawnSync } = require('child_process');
+  const tries = [
+    ['python', ['--version']],
+    ['python3', ['--version']],
+    ['py', ['-3', '--version']],
+  ];
+  const out = [];
+  for (const [exe, args] of tries) {
+    try {
+      const r = spawnSync(exe, args, { encoding: 'utf8', timeout: 8000 });
+      const ver = ((r.stdout || '') + (r.stderr || '')).trim();
+      if (r.status === 0 && /Python\s+3\.\d+/.test(ver)) {
+        return { exe, version: ver };
+      }
+      if (ver) out.push(exe + ': ' + ver.slice(0, 60));
+    } catch (e) { /* 该命令不存在，继续试下一个 */ }
+  }
+  return { error: out.join(' | ') || '没找到 Python 3' };
+}
+
+/** 用 Node 原生 https 下载文件（带重定向、进度回调），不依赖 Obsidian 网络层。 */
+function asrWizardDownload(url, dest, onBytes) {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const fs = require('fs');
+    const fetch = (u, redirects) => {
+      if (redirects > 5) return reject(new Error('下载重定向过多'));
+      https.get(u, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          return fetch(res.headers.location, redirects + 1);
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error('HTTP ' + res.statusCode + '：' + u));
+        }
+        const tmp = dest + '.part';
+        const file = fs.createWriteStream(tmp);
+        let got = 0;
+        res.on('data', (chunk) => {
+          got += chunk.length;
+          if (onBytes) onBytes(got, Number(res.headers['content-length'] || 0));
+        });
+        res.on('error', (e) => { try { file.close(); } catch (_) {} reject(e); });
+        file.on('error', (e) => { res.destroy(); reject(e); });
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close(() => {
+            try { fs.renameSync(tmp, dest); resolve(got); }
+            catch (e) { reject(e); }
+          });
+        });
+      }).on('error', reject);
+    };
+    fetch(url, 0);
+  });
+}
+
+/** 跑一条子进程命令，把输出逐行回调给进度面板。 */
+function asrWizardRun(exe, args, opts, onLine) {
+  return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process');
+    const child = spawn(exe, args, opts || {});
+    let tail = '';
+    const push = (buf) => {
+      const s = String(buf || '');
+      tail = (tail + s).slice(-4000);
+      const lines = tail.split(/\r?\n/);
+      tail = lines.pop() || '';
+      for (const line of lines) if (onLine) onLine(line.trim());
+    };
+    child.stdout && child.stdout.on('data', push);
+    child.stderr && child.stderr.on('data', push);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (onLine && tail.trim()) onLine(tail.trim());
+      if (code === 0) resolve(tail); else reject(new Error('命令退出码 ' + code));
+    });
+  });
+}
+
+class AsrWizardModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.cancelled = false;
+    this.child = null;
+  }
+
+  onOpen() {
+    const el = this.contentEl;
+    el.empty();
+    el.addClass('er-wizard');
+    el.createEl('h2', { text: '一键安装本地转写' });
+    el.createEl('p', { cls: 'er-wizard-lead',
+      text: '全程在本机完成：装 Python 依赖、下载脚本与模型，不上传任何音频或笔记。约 150 MB 下载，首次几分钟。' });
+    this.statusEl = el.createEl('div', { cls: 'er-wizard-status', text: '准备就绪，点下面开始。' });
+    this.bar = el.createEl('div', { cls: 'er-wizard-bar' });
+    this.barFill = this.bar.createDiv({ cls: 'er-wizard-bar-fill' });
+    this.logEl = el.createEl('div', { cls: 'er-wizard-log' });
+    const btns = el.createDiv({ cls: 'er-wizard-btns' });
+    this.startBtn = btns.createEl('button', { cls: 'mod-cta', text: '开始安装' });
+    this.startBtn.onclick = () => this.run();
+    this.cancelBtn = btns.createEl('button', { text: '取消' });
+    this.cancelBtn.onclick = () => { this.cancelled = true; if (this.child) { try { this.child.kill(); } catch (_) {} } this.status('已取消。'); };
+    this.doneBtn = btns.createEl('button', { text: '完成' });
+    this.doneBtn.onclick = () => this.close();
+    this.doneBtn.style.display = 'none';
+  }
+
+  status(s) { if (this.statusEl) this.statusEl.textContent = s; }
+  log(s) {
+    if (!this.logEl) return;
+    const line = this.logEl.createDiv({ cls: 'er-wizard-line', text: String(s).slice(0, 300) });
+    this.logEl.scrollTop = this.logEl.scrollHeight;
+    return line;
+  }
+  pct(p) { if (this.barFill) this.barFill.style.width = Math.max(0, Math.min(100, p)) + '%'; }
+
+  async run() {
+    if (this.busy) return;
+    this.busy = true;
+    this.cancelled = false;
+    this.startBtn.disabled = true;
+    this.logEl.empty();
+    const fs = require('fs');
+    const path = require('path');
+    try {
+      // 1) Python
+      this.status('① 检测 Python…'); this.pct(5);
+      const py = asrWizardDetectPython();
+      if (!py || !py.exe) throw new Error('没找到 Python 3。请先到 python.org 下载安装（安装时勾选 Add Python to PATH），装完再点开始。' + (py && py.error ? '\n' + py.error : ''));
+      this.log('Python：' + py.exe + '（' + py.version + '）');
+
+      const base = path.join(this.plugin.manifest.dir || '.', 'asr');
+      const dir = base.replace(/\\/g, '/');
+      const modelDir = (base + '/model').replace(/\\/g, '/');
+      fs.mkdirSync(modelDir, { recursive: true });
+
+      // 2) venv
+      this.status('② 创建独立环境…'); this.pct(15);
+      const venv = path.join(base, '.venv');
+      const pyInVenv = (process.platform === 'win32')
+        ? path.join(venv, 'Scripts', 'python.exe')
+        : path.join(venv, 'bin', 'python');
+      if (!fs.existsSync(pyInVenv)) {
+        await asrWizardRun(py.exe, ['-m', 'venv', venv], {}, (l) => this.log(l));
+      }
+      if (this.cancelled) throw new Error('已取消');
+      this.log('虚拟环境：' + pyInVenv);
+
+      // 3) pip
+      this.status('③ 安装依赖（清华源，约 1-2 分钟）…'); this.pct(30);
+      await asrWizardRun(pyInVenv, ['-m', 'pip', 'install', '-i', ASR_WIZARD.pipIndex, ASR_WIZARD.pkgs],
+        {}, (l) => this.log(l));
+      if (this.cancelled) throw new Error('已取消');
+
+      // 4) 脚本
+      this.status('④ 写入转写脚本…'); this.pct(48);
+      fs.writeFileSync(path.join(base, 'transcribe.py'), ASR_WIZARD.script, 'utf8');
+      this.log('脚本：' + (base + '/transcribe.py').replace(/\\/g, '/'));
+
+      // 5) 模型
+      this.status('⑤ 下载模型（约 145 MB）…');
+      for (let i = 0; i < ASR_WIZARD.modelFiles.length; i++) {
+        if (this.cancelled) throw new Error('已取消');
+        const [name, , dest] = ASR_WIZARD.modelFiles[i];
+        const target = path.join(modelDir, dest);
+        if (!fs.existsSync(target)) {
+          this.log('下载 ' + name + '…');
+          await asrWizardDownload(asrWizardUrl(name), target, (got, total) => {
+            const basePct = 48 + Math.round((i + (total ? got / total : 0)) / ASR_WIZARD.modelFiles.length * 42);
+            this.pct(basePct);
+            if (total) this.status('⑤ 下载模型 ' + name + ' ' + Math.round(got / total * 100) + '%');
+          });
+        }
+      }
+      if (this.cancelled) throw new Error('已取消');
+
+      // 6) 写设置
+      this.status('⑥ 保存设置并检测…'); this.pct(92);
+      this.plugin.data.settings.whisperDir = dir;
+      this.plugin.data.settings.whisperPython = pyInVenv.replace(/\\/g, '/');
+      this.plugin.data.settings.whisperModelDir = modelDir;
+      await this.plugin.save();
+      const r = await this.plugin.checkWhisper();
+      if (!r.ok) throw new Error('安装完成但检测未通过：' + (r.err || '未知原因'));
+
+      this.status('✓ 安装完成！没有字幕的节目现在可以点「本地转写这一集」了。');
+      this.log('就绪：' + r.exe);
+      this.pct(100);
+      new Notice('✓ 本地转写安装完成，可以开始使用了');
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      this.status('安装失败：' + msg.split('\n')[0]);
+      this.log('错误：' + msg.replace(/\n/g, ' | '));
+      new Notice('本地转写安装失败：' + msg.split('\n')[0], 10000);
+    } finally {
+      this.busy = false;
+      if (this.startBtn) { this.startBtn.disabled = false; this.startBtn.setText('重试'); }
+      if (this.doneBtn) this.doneBtn.style.display = '';
+    }
+  }
+}
+/* <<< ASR_WIZARD_END */
+
 class EnglishReaderSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -4162,6 +4397,11 @@ class EnglishReaderSettingTab extends PluginSettingTab {
       text: '核心功能不依赖以上任何文件。市场安装只含 main.js / manifest.json / styles.css；' +
             '需要增强时从仓库 extras/ 手动放置脚本并在下方填路径，插件不会自动下载或安装依赖。',
     });
+    const quick = addBox.createEl('div', { cls: 'er-addons-quick' });
+    quick.createEl('div', { cls: 'er-addons-quick-title', text: '不想折腾？用一键安装：' });
+    quick.createEl('button', { cls: 'mod-cta er-install-btn', text: '一键安装本地转写' }).onclick = () => {
+      new AsrWizardModal(this.app, this.plugin).open();
+    };
     if (!add.asrConfigured) {
       const help = addBox.createEl('div', { cls: 'er-addons-help' });
       help.createEl('div', { cls: 'er-addons-help-title', text: '本地转写怎么配（3 步，可选）' });
@@ -4447,6 +4687,11 @@ class EnglishReaderPlugin extends Plugin {
       id: 'open-reader',
       name: '打开菠萝英语精听',
       callback: () => this.activateView(),
+    });
+    this.addCommand({
+      id: 'install-asr',
+      name: '一键安装本地转写（可选）',
+      callback: () => new AsrWizardModal(this.app, this).open(),
     });
     this.addCommand({
       id: 'refresh-feeds',
@@ -6016,6 +6261,7 @@ module.exports.__statModal = StatModal;
 module.exports.__stats = { mistakeKey, statSeries, monthStat, heatmapWeeks };
 module.exports.__listen = { mergeHours, topShows, listenDiscoveries, clockLabel, ringSlice, rideText, renderClockRing };
 module.exports.__asrSetup = ASR_SETUP;
+module.exports.__asrWizard = { ASR_WIZARD, AsrWizardModal, asrWizardUrl, asrWizardDetectPython };
 module.exports.__blind = { pickBlindSegs, segSpan, blindRatio, blindWeeks, BLIND_MIN_SENTENCES };
 module.exports.__blindModal = BlindModal;
 module.exports.__shadow = { scoreShadow, shadowTokens, lcsPairs };
