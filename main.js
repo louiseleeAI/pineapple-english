@@ -1927,6 +1927,7 @@ class EnglishReaderView extends ItemView {
       followBtn.setText(this.data.settings.autoScroll ? '跟随中 ●' : '跟随已关 ○');
       if (this.data.settings.autoScroll && this.curSeg >= 0) {
         this.lastUserScroll = 0;
+        this._programmaticScroll = 0;
         this.followCurrent(this.curSeg);
       }
     };
@@ -2055,7 +2056,11 @@ class EnglishReaderView extends ItemView {
     // 即使 curSeg 相同，也要确认 DOM 高亮确实在 idx 上（自动连播改了 curSeg 却跳过刷新时会错位）
     if (idx === this.curSeg && !force) {
       const now = this.segsEl.querySelector('.er-seg.is-playing');
-      if (now && Number(now.dataset.seg) === idx) return;
+      if (now && Number(now.dataset.seg) === idx) {
+        // 高亮没变也要每拍检查视野：用户滚走 / 暂停跟随结束后，视图要能自己回到当前句
+        this.maybeFollowCurrent(idx);
+        return;
+      }
     }
     const prev = this.segsEl.querySelector('.er-seg.is-playing');
     if (prev) prev.removeClass('is-playing');
@@ -2064,7 +2069,7 @@ class EnglishReaderView extends ItemView {
       cur.addClass('is-playing');
       this.curSeg = idx;
       this.updateSegProgress(idx);
-      if (this.data.settings.autoScroll && this.isFollowing()) this.followCurrent(idx);
+      this.maybeFollowCurrent(idx);
     }
   }
 
@@ -2172,24 +2177,34 @@ class EnglishReaderView extends ItemView {
     return Date.now() - (this.lastUserScroll || 0) > 4000;
   }
 
+  /** 高亮与视图跟随解耦：每一拍都检查当前句是否在视野内，暂停期结束自动归位 */
+  maybeFollowCurrent(idx) {
+    if (!this.data.settings.autoScroll || !this.isFollowing()) return;
+    this.followCurrent(idx);
+  }
+
   /** 让当前句回到阅读区舒适位置：只滚 .er-pane，平滑过渡 */
   followCurrent(idx) {
     const pane = this.paneEl;
     const cur = this.segsEl && this.segsEl.querySelector(`[data-seg="${idx}"]`);
-    if (!pane || !cur) return;
+    if (!pane || !cur || (cur.hasClass && cur.hasClass('is-filtered-out'))) return;
     const pr = pane.getBoundingClientRect();
     const cr = cur.getBoundingClientRect();
-    if (!pr.height) return;
+    if (!pr.height || !cr.height) return;
     const topGuard = pr.top + pr.height * 0.30;
     const bottomGuard = pr.top + pr.height * 0.66;
     // 还在舒适区内就不动，避免每句都抖一下
     if (cr.top >= topGuard && cr.bottom <= bottomGuard) return;
-    const target = pane.scrollTop + (cr.top - pr.top) - pr.height * 0.36;
-    this._programmaticScroll = Date.now();
+    const target = Math.max(0, pane.scrollTop + (cr.top - pr.top) - pr.height * 0.36);
+    // 已经到位就不用动；平滑滚动有动画，别每拍重复启动打断它
+    if (Math.abs(pane.scrollTop - target) < 4) return;
+    const now = Date.now();
+    if (now - (this._programmaticScroll || 0) < 500) return;
+    this._programmaticScroll = now;
     try {
-      pane.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+      pane.scrollTo({ top: target, behavior: 'smooth' });
     } catch (e) {
-      pane.scrollTop = Math.max(0, target);
+      pane.scrollTop = target;
     }
   }
 
