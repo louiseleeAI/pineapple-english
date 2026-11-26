@@ -4158,6 +4158,20 @@ const ASR_WIZARD = {
   script: "\"\"\"\nEnglish Reader \u2014 \u672c\u5730\u8f6c\u5199\u811a\u672c\uff08faster-whisper\uff09\n\n\u7528\u6cd5:\n    python transcribe.py <\u97f3\u9891\u8def\u5f84> <\u8f93\u51faSRT\u8def\u5f84> <\u6a21\u578b\u76ee\u5f55> [\u7ebf\u7a0b\u6570]\n\n\u8f93\u51fa:\n    stdout \u6bcf\u884c PROGRESS <0-100> \u8868\u793a\u8fdb\u5ea6\uff0c\u6700\u540e\u8f93\u51fa DONE <\u53e5\u6570>\n    \u5931\u8d25\u65f6 stderr \u8f93\u51fa\u9519\u8bef\u5e76\u8fd4\u56de\u975e 0\n\"\"\"\nimport sys\nimport os\nimport time\n\ndef fmt_ts(sec):\n    if sec < 0:\n        sec = 0\n    ms = int(round(sec * 1000))\n    h, ms = divmod(ms, 3600000)\n    m, ms = divmod(ms, 60000)\n    s, ms = divmod(ms, 1000)\n    return \"%02d:%02d:%02d,%03d\" % (h, m, s, ms)\n\ndef main():\n    if len(sys.argv) < 4:\n        sys.stderr.write(\"usage: transcribe.py <audio> <out.srt> <model_dir> [threads]\\n\")\n        return 2\n\n    audio = sys.argv[1]\n    out_srt = sys.argv[2]\n    model_dir = sys.argv[3]\n    threads = int(sys.argv[4]) if len(sys.argv) > 4 else 8\n\n    if not os.path.exists(audio):\n        sys.stderr.write(\"audio not found: %s\\n\" % audio)\n        return 3\n    if not os.path.isdir(model_dir):\n        sys.stderr.write(\"model dir not found: %s\\n\" % model_dir)\n        return 4\n\n    # \u79bb\u7ebf\u6a21\u5f0f\uff1a\u7981\u6b62\u8054\u7f51\u627e\u6a21\u578b\n    os.environ.setdefault(\"HF_HUB_OFFLINE\", \"1\")\n    os.environ.setdefault(\"TRANSFORMERS_OFFLINE\", \"1\")\n\n    from faster_whisper import WhisperModel\n\n    t0 = time.time()\n    model = WhisperModel(\n        model_dir,\n        device=\"cpu\",\n        compute_type=\"int8\",\n        cpu_threads=threads,\n        num_workers=1,\n    )\n    segments, info = model.transcribe(\n        audio,\n        language=\"en\",\n        beam_size=1,\n        vad_filter=True,\n        vad_parameters=dict(min_silence_duration_ms=500),\n        condition_on_previous_text=False,\n    )\n\n    total = float(getattr(info, \"duration\", 0) or 0)\n    sys.stdout.write(\"TOTAL %.2f\\n\" % total)\n    sys.stdout.flush()\n\n    lines = []\n    n = 0\n    last_pct = -1\n    for seg in segments:\n        n += 1\n        text = (seg.text or \"\").strip()\n        if text:\n            lines.append(\n                \"%d\\n%s --> %s\\n%s\\n\" % (n, fmt_ts(seg.start), fmt_ts(seg.end), text)\n            )\n        if total > 0:\n            pct = min(99, int(seg.end / total * 100))\n            if pct != last_pct:\n                last_pct = pct\n                sys.stdout.write(\"PROGRESS %d\\n\" % pct)\n                sys.stdout.flush()\n\n    with open(out_srt, \"w\", encoding=\"utf-8\") as f:\n        f.write(\"\\n\".join(lines))\n\n    sys.stdout.write(\"PROGRESS 100\\n\")\n    sys.stdout.write(\"DONE %d %.1f\\n\" % (len(lines), time.time() - t0))\n    sys.stdout.flush()\n    return 0\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n",
 };
 
+function asrWizardBaseDir(pluginId, platform, env) {
+  const os = require('os');
+  const path = require('path');
+  const plat = platform || process.platform;
+  const e = env || process.env;
+  const home = os.homedir();
+  let root;
+  if (plat === 'win32') root = e.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  else if (plat === 'darwin') root = path.join(home, 'Library', 'Application Support');
+  else root = e.XDG_DATA_HOME || path.join(home, '.local', 'share');
+  const id = String(pluginId || 'pineapple').replace(/[^A-Za-z0-9._-]/g, '_');
+  return path.join(root, 'pineapple-asr', id);
+}
+
 function asrWizardUrl(file) {
   return ASR_WIZARD.mirrorBases[0] + ASR_WIZARD.modelRepo + '/resolve/main/' + file;
 }
@@ -4298,7 +4312,7 @@ class AsrWizardModal extends Modal {
       if (!py || !py.exe) throw new Error('没找到 Python 3。请先到 python.org 下载安装（安装时勾选 Add Python to PATH），装完再点开始。' + (py && py.error ? '\n' + py.error : ''));
       this.log('Python：' + py.exe + '（' + py.version + '）');
 
-      const base = path.join(this.plugin.manifest.dir || '.', 'asr');
+      const base = asrWizardBaseDir(this.plugin.manifest && this.plugin.manifest.id);
       const dir = base.replace(/\\/g, '/');
       const modelDir = (base + '/model').replace(/\\/g, '/');
       fs.mkdirSync(modelDir, { recursive: true });
@@ -6261,7 +6275,7 @@ module.exports.__statModal = StatModal;
 module.exports.__stats = { mistakeKey, statSeries, monthStat, heatmapWeeks };
 module.exports.__listen = { mergeHours, topShows, listenDiscoveries, clockLabel, ringSlice, rideText, renderClockRing };
 module.exports.__asrSetup = ASR_SETUP;
-module.exports.__asrWizard = { ASR_WIZARD, AsrWizardModal, asrWizardUrl, asrWizardDetectPython };
+module.exports.__asrWizard = { ASR_WIZARD, AsrWizardModal, asrWizardUrl, asrWizardDetectPython, asrWizardBaseDir };
 module.exports.__blind = { pickBlindSegs, segSpan, blindRatio, blindWeeks, BLIND_MIN_SENTENCES };
 module.exports.__blindModal = BlindModal;
 module.exports.__shadow = { scoreShadow, shadowTokens, lcsPairs };

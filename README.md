@@ -86,7 +86,7 @@ Desktop only (local Python is used for ASR and recording).
 
 命令面板里搜「一键安装本地转写」也能直接打开向导。
 
-需要本机先装 Python 3（[python.org](https://www.python.org/downloads/)，安装时勾选 Add Python to PATH）。没有 Python 时向导会提示，装完再点开始。安装完成后文件都在插件目录下 `asr/`（`.venv/` + `model/`），不会进笔记、不会被提交。
+需要本机先装 Python 3（[python.org](https://www.python.org/downloads/)，安装时勾选 Add Python to PATH）。没有 Python 时向导会提示，装完再点开始。安装文件放在系统应用数据目录 `pineapple-asr/pineapple-english/`（Windows 在 `%LOCALAPPDATA%`，macOS 在 `~/Library/Application Support`，Linux 在 `~/.local/share`），含 `.venv/` + `model/`。不放插件目录是为了让 Obsidian 更新插件时不会冲掉环境；也不会进笔记、不会被提交。
 
 手动配置也可以（适合已有 Python 环境的用户）：
 
