@@ -2040,6 +2040,8 @@ class EnglishReaderView extends ItemView {
     this.curSeg = idx;
     if (this.data.settings.loopSentence) this.loopIdx = idx;
     this.seek(this.segs[idx].start || 0);
+    // 自动连播会跳过下一拍的 syncToTime，这里主动刷新高亮与句进度条，避免卡在旧句
+    this.syncToTime(this.audioEl.currentTime, true);
   }
 
   syncToTime(t, force) {
@@ -2050,7 +2052,11 @@ class EnglishReaderView extends ItemView {
       const mid = (lo + hi) >> 1;
       if ((this.segs[mid].start || 0) <= t) { idx = mid; lo = mid + 1; } else hi = mid - 1;
     }
-    if (idx === this.curSeg && !force) return;
+    // 即使 curSeg 相同，也要确认 DOM 高亮确实在 idx 上（自动连播改了 curSeg 却跳过刷新时会错位）
+    if (idx === this.curSeg && !force) {
+      const now = this.segsEl.querySelector('.er-seg.is-playing');
+      if (now && Number(now.dataset.seg) === idx) return;
+    }
     const prev = this.segsEl.querySelector('.er-seg.is-playing');
     if (prev) prev.removeClass('is-playing');
     const cur = this.segsEl.querySelector(`[data-seg="${idx}"]`);
