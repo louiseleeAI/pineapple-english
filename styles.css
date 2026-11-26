@@ -1554,26 +1554,43 @@
 
 /* P1: 当前句聚焦（默认开，由 .focus-current 控制） */
 .er-root.focus-current .er-seg {
-  opacity: 0.55;
+  opacity: 0.68;
   transition: opacity 160ms ease, color 160ms ease;
 }
-/* 去掉整行底色，改为只包住文字本身：色块随句子长短变化 */
+/* 所有行文字宽度随内容，当前句切换时不左右跳动 */
+.er-root.focus-current .er-seg-text {
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
+}
 .er-root.focus-current .er-seg.is-playing {
   opacity: 1;
   background: transparent;
   box-shadow: none;
 }
+/* 外层：整句一根左竖条，用伪元素不影响文字位置 */
 .er-root.focus-current .er-seg.is-playing .er-seg-text {
-  flex: 0 1 auto;
-  width: fit-content;
-  max-width: 100%;
+  position: relative;
   color: var(--er-brand-strong);
   font-weight: 500;
+}
+.er-root.focus-current .er-seg.is-playing .er-seg-text::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--er-brand);
+  z-index: 1;
+}
+/* 内层 inline span：底色逐行贴合，长句最后一行不拖空尾巴 */
+.er-root.focus-current .er-seg.is-playing .er-seg-ink {
   background: rgba(217, 138, 61, 0.18);
-  box-shadow: inset 2px 0 0 var(--er-brand);
   border-radius: 4px;
-  padding: 2px 7px;
-  margin: -2px -7px;
+  padding: 2px 6px;
+  margin: -2px -6px;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }

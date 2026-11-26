@@ -1980,7 +1980,8 @@ class EnglishReaderView extends ItemView {
         text: showTime ? fmtTime(s.start || 0) : '—',
       });
       if (showTime) t.onclick = (e) => { e.stopPropagation(); this.seek(s.start || 0); };
-      row.createSpan({ cls: 'er-seg-text', text: s.text });
+      const segText = row.createSpan({ cls: 'er-seg-text' });
+      segText.createSpan({ cls: 'er-seg-ink', text: s.text });
       const tools = row.createDiv('er-seg-tools');
       const rec = tools.createEl('button', { cls: 'er-mini', attr: { title: '跟读这一句' }, text: '🎙' });
       rec.onclick = (e) => { e.stopPropagation(); this.startRecording(s); };
