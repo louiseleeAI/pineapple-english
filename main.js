@@ -1678,6 +1678,10 @@ class EnglishReaderView extends ItemView {
     audio.onplay = () => {
       setIcon(playBtn, 'pause');
       if (this._rootEl) this._rootEl.addClass('is-playing');
+      if (!this.data.settings.autoScroll && !this._followHintShown) {
+        this._followHintShown = true;
+        new Notice('视图跟随已关闭：点逐句精听上方「跟随已关 ○ · 点此开启」即可自动滚到当前句');
+      }
       if (!this._playBumped) {
         this._playBumped = true;
         const cur = this.plugin._playingItem;
@@ -1916,16 +1920,21 @@ class EnglishReaderView extends ItemView {
       new Notice(on ? '已开启单句循环：反复听当前句' : '已关闭单句循环');
     };
 
+    const followOn = this.data.settings.autoScroll;
     const followBtn = info.createEl('button', {
-      cls: 'er-link-btn er-follow-btn',
-      text: this.data.settings.autoScroll ? '跟随中 ●' : '跟随已关 ○',
-      attr: { title: '播放时自动滚动到当前句' },
+      cls: 'er-link-btn er-follow-btn' + (followOn ? ' is-active' : ' is-off'),
+      text: followOn ? '跟随中 ●' : '跟随已关 ○ · 点此开启',
+      attr: { title: followOn ? '播放时自动滚动到当前句（点击关闭）' : '当前已关闭自动滚动，点击开启' },
     });
     followBtn.onclick = async () => {
       this.data.settings.autoScroll = !this.data.settings.autoScroll;
       await this.plugin.save();
-      followBtn.setText(this.data.settings.autoScroll ? '跟随中 ●' : '跟随已关 ○');
-      if (this.data.settings.autoScroll && this.curSeg >= 0) {
+      const on = this.data.settings.autoScroll;
+      followBtn.setText(on ? '跟随中 ●' : '跟随已关 ○ · 点此开启');
+      followBtn.toggleClass('is-active', on);
+      followBtn.toggleClass('is-off', !on);
+      followBtn.setAttribute('title', on ? '播放时自动滚动到当前句（点击关闭）' : '当前已关闭自动滚动，点击开启');
+      if (on && this.curSeg >= 0) {
         this.lastUserScroll = 0;
         this._programmaticScroll = 0;
         this.followCurrent(this.curSeg);

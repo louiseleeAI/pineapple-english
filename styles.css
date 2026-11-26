@@ -422,6 +422,12 @@
   color: var(--er-muted);
 }
 .er-follow-btn { margin-left: 2px; }
+.er-follow-btn.is-off {
+  color: var(--er-warn, #b8860b);
+  font-weight: 600;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
 .er-auto-btn.is-active { color: var(--er-accent); font-weight: 600; }
 .er-seg-search-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
 .er-seg-search { flex: 1 1 auto; max-width: 46em; font-size: 12.5px; padding: 4px 8px; }
