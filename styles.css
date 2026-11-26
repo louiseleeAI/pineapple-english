@@ -1555,15 +1555,30 @@
 /* P1: 当前句聚焦（默认开，由 .focus-current 控制） */
 .er-root.focus-current .er-seg {
   opacity: 0.55;
-  transition: opacity 160ms ease, background 160ms ease, color 160ms ease;
+  transition: opacity 160ms ease, color 160ms ease;
 }
+/* 去掉整行底色，改为只包住文字本身：色块随句子长短变化 */
 .er-root.focus-current .er-seg.is-playing {
   opacity: 1;
+  background: transparent;
+  box-shadow: none;
+}
+.er-root.focus-current .er-seg.is-playing .er-seg-text {
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
   color: var(--er-brand-strong);
   font-weight: 500;
-  background: rgba(217, 138, 61, 0.10);
+  background: rgba(217, 138, 61, 0.18);
   box-shadow: inset 2px 0 0 var(--er-brand);
+  border-radius: 4px;
+  padding: 2px 7px;
+  margin: -2px -7px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
+/* 文字不再占满一行，工具按钮仍需靠右 */
+.er-root.focus-current .er-seg .er-seg-tools { margin-left: auto; }
 
 /* P3: 空状态 */
 .er-empty-icon {
