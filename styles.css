@@ -1489,3 +1489,109 @@
 }
 .er-wizard-line { white-space: pre-wrap; word-break: break-all; }
 .er-wizard-btns { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+
+/* ==================================================================
+   UI 第二批：进度条 / 聚焦 / 品牌色 / 空状态
+   只做覆盖追加；如需回退，删除本段即可。
+   ================================================================== */
+.er-root {
+  /* P2 品牌色：暖琥珀，只用于品牌标识、播放按钮、当前句 */
+  --er-brand: #d98a3d;
+  --er-brand-strong: #b96a1f;
+}
+
+/* P2: 品牌标识与主播放按钮 */
+.er-brand {
+  color: var(--er-brand-strong);
+  letter-spacing: 0.5px;
+}
+.er-play {
+  background: var(--er-brand);
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(185, 106, 31, 0.28);
+}
+.er-play:hover { filter: brightness(1.06); }
+
+/* P0: 可拖动进度条 */
+.er-seek {
+  flex: 1 1 90px;
+  min-width: 60px;
+  max-width: 260px;
+  height: 6px;
+  margin: 0 2px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(to right,
+    var(--er-brand) 0%, var(--er-brand) var(--er-seek-pct, 0%),
+    var(--background-modifier-border) var(--er-seek-pct, 0%),
+    var(--background-modifier-border) 100%);
+}
+.er-seek::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--er-brand-strong);
+  border: 2px solid var(--background-primary);
+  box-shadow: 0 0 0 1px var(--er-brand-strong);
+  cursor: grab;
+}
+.er-seek::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--er-brand-strong);
+  border: 2px solid var(--background-primary);
+  cursor: grab;
+}
+.er-seek:focus-visible { outline: 2px solid var(--er-brand); outline-offset: 2px; }
+.er-time { min-width: 88px; }
+
+/* P1: 当前句聚焦（默认开，由 .focus-current 控制） */
+.er-root.focus-current .er-seg {
+  opacity: 0.55;
+  transition: opacity 160ms ease, background 160ms ease, color 160ms ease;
+}
+.er-root.focus-current .er-seg.is-playing {
+  opacity: 1;
+  color: var(--er-brand-strong);
+  font-weight: 500;
+  background: rgba(217, 138, 61, 0.10);
+  box-shadow: inset 2px 0 0 var(--er-brand);
+}
+
+/* P3: 空状态 */
+.er-empty-icon {
+  display: inline-flex;
+  color: var(--er-brand);
+  margin-bottom: 6px;
+}
+.er-empty-icon .svg-icon { width: 22px; height: 22px; }
+.er-empty-title { font-weight: 500; font-size: 14px; margin-bottom: 4px; }
+.er-empty-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.er-empty-actions button.mod-cta { border-color: var(--er-brand); }
+
+/* P3: 主题语义色，去掉硬编码 fallback */
+.er-seg-badge.has-score { color: var(--text-success, var(--er-good)); }
+.er-seg-badge.is-hot { background: var(--text-error, var(--er-bad)); color: var(--text-on-accent, #fff); }
+.er-blind-dot.is-g, .er-blind-judge button.is-g { background: var(--text-success, var(--color-green)); border-color: var(--text-success, var(--color-green)); }
+.er-blind-dot.is-h, .er-blind-judge button.is-h { background: var(--text-warning, var(--color-yellow)); border-color: var(--text-warning, var(--color-yellow)); }
+.er-blind-dot.is-x, .er-blind-judge button.is-x { background: var(--text-error, var(--color-red)); border-color: var(--text-error, var(--color-red)); }
+
+/* P3: 轻微动效，尊重减少动态偏好 */
+@keyframes er-play-pulse {
+  0%, 100% { box-shadow: 0 1px 3px rgba(185, 106, 31, 0.28); }
+  50% { box-shadow: 0 1px 3px rgba(185, 106, 31, 0.28), 0 0 0 4px rgba(217, 138, 61, 0.14); }
+}
+.er-root.is-playing .er-play { animation: er-play-pulse 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .er-root.is-playing .er-play { animation: none; }
+  .er-root.focus-current .er-seg,
+  .er-seg.is-playing,
+  .er-wizard-bar-fill { transition: none; }
+}

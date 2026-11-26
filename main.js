@@ -107,6 +107,7 @@ const DEFAULT_SETTINGS = {
   autoAdvance: false,
   shadowGate: false,
   segSearch: true,
+  focusCurrent: true,
 };
 
 /* ------------------------------------------------------------------ */
@@ -1169,6 +1170,8 @@ class EnglishReaderView extends ItemView {
     }
     root.empty();
     root.addClass('er-root');
+    this._rootEl = root;
+    root.toggleClass('focus-current', this.data.settings.focusCurrent !== false);
     try {
       const side = root.createDiv('er-side');
       this.renderSide(side);
@@ -1626,6 +1629,26 @@ class EnglishReaderView extends ItemView {
 
     const time = bar.createSpan({ cls: 'er-time', text: '0:00 / ' + (it.duration ? fmtTime(it.duration) : '--:--') });
 
+    // P0: 可拖动进度条，放在时间之后；拖动时暂停感知识别，避免时长误计
+    const seek = bar.createEl('input', {
+      cls: 'er-seek',
+      attr: { type: 'range', min: '0', max: '1000', value: '0', step: '1', 'aria-label': '播放进度' },
+    });
+    this._seekEl = seek;
+    this._seeking = false;
+    const applySeek = () => {
+      const d = audio.duration || it.duration;
+      if (!isFinite(d) || d <= 0) return;
+      const frac = Math.max(0, Math.min(1, Number(seek.value) / 1000));
+      try { audio.currentTime = frac * d; } catch (e) { /* ignore */ }
+      this._lastTickT = audio.currentTime;
+    };
+    seek.addEventListener('pointerdown', () => { this._seeking = true; });
+    seek.addEventListener('keydown', () => { this._seeking = true; });
+    seek.addEventListener('input', applySeek);
+    seek.addEventListener('change', () => { applySeek(); this._seeking = false; });
+    seek.addEventListener('pointerup', () => { this._seeking = false; });
+
     const ctrls = bar.createDiv('er-audio-ctrls');
     const mk = (icon, title, fn) => {
       const b = ctrls.createEl('button', { cls: 'er-icon-btn', attr: { title } });
@@ -1654,15 +1677,27 @@ class EnglishReaderView extends ItemView {
 
     audio.onplay = () => {
       setIcon(playBtn, 'pause');
+      if (this._rootEl) this._rootEl.addClass('is-playing');
       if (!this._playBumped) {
         this._playBumped = true;
         const cur = this.plugin._playingItem;
         if (cur && cur.id) this.plugin.bumpItemPlay(cur.id);
       }
     };
-    audio.onpause = () => { setIcon(playBtn, 'play'); };
+    audio.onpause = () => { setIcon(playBtn, 'play'); if (this._rootEl) this._rootEl.removeClass('is-playing'); };
     audio.ontimeupdate = () => {
       time.setText(fmtTime(audio.currentTime) + ' / ' + (it.duration || isFinite(audio.duration) ? fmtTime(it.duration || audio.duration) : '--:--'));
+
+      // P0: 同步进度条（拖动中不回写，避免手柄抖动）
+      const seekEl = this._seekEl;
+      if (seekEl && !this._seeking) {
+        const d = audio.duration || it.duration;
+        if (isFinite(d) && d > 0) {
+          const frac = Math.max(0, Math.min(1, audio.currentTime / d));
+          seekEl.value = String(Math.round(frac * 1000));
+          seekEl.style.setProperty('--er-seek-pct', (frac * 100).toFixed(1) + '%');
+        }
+      }
 
       if (this.maybeLoopSeg(audio)) return; // 这一拍刚跳回句首，不更新高亮避免闪烁
       if (this.maybeAutoAdvance(audio)) return;
@@ -1797,7 +1832,9 @@ class EnglishReaderView extends ItemView {
     }
     if (!this.segs.length) {
       const box = pane.createDiv('er-transcript-empty');
-      box.createDiv({ text: it.audio ? '这一集还没有可用的逐字稿。' : '这个源是图文内容，没有音频/字幕。' });
+      const emptyIcon = box.createSpan({ cls: 'er-empty-icon' });
+      setIcon(emptyIcon, 'file-question');
+      box.createDiv({ cls: 'er-empty-title', text: it.audio ? '这一集还没有可用的逐字稿。' : '这个源是图文内容，没有音频/字幕。' });
       box.createDiv({ cls: 'er-hint', text: '可以：① 换到「原文阅读」；② 用下面按钮到网页里找逐字稿；③ 手动粘贴字幕。' });
       const row = box.createDiv('er-empty-actions');
       const b1 = row.createEl('button', { text: '去网页找逐字稿' });
@@ -4514,6 +4551,15 @@ class EnglishReaderSettingTab extends PluginSettingTab {
       .addToggle((t) => t.setValue(this.plugin.data.settings.shadowGate).onChange(async (v) => {
         this.plugin.data.settings.shadowGate = v;
         await this.plugin.save();
+      }));
+
+    new Setting(containerEl)
+      .setName('当前句聚焦')
+      .setDesc('播放时突出当前句、淡化其余句子，视线更跟随。关闭则所有句子同样清晰。')
+      .addToggle((t) => t.setValue(this.plugin.data.settings.focusCurrent !== false).onChange(async (v) => {
+        this.plugin.data.settings.focusCurrent = v;
+        await this.plugin.save();
+        if (this.plugin.view && this.plugin.view.render) this.plugin.view.render();
       }));
 
     new Setting(containerEl)
