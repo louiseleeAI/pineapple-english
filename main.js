@@ -4142,13 +4142,13 @@ const ASR_SETUP = {
 /* >>> ASR_WIZARD_BEGIN */
 const ASR_WIZARD = {
   pipIndex: 'https://pypi.tuna.tsinghua.edu.cn/simple',
-  pkgs: 'faster-whisper',
+  pkgs: 'faster-whisper==1.2.1',
   modelRepo: 'Systran/faster-whisper-base.en',
   modelFiles: [
-    ['config.json', 2227, 'config.json'],
-    ['tokenizer.json', 2128466, 'tokenizer.json'],
-    ['vocabulary.txt', 422309, 'vocabulary.txt'],
-    ['model.bin', 145216508, 'model.bin'],
+    ['config.json', 2227, 'config.json', 'f3bc3821e9fc76a27bae538e11ae5b677dcdd352b4600429ce7951d398569aeb'],
+    ['tokenizer.json', 2128466, 'tokenizer.json', '929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df'],
+    ['vocabulary.txt', 422309, 'vocabulary.txt', 'ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf'],
+    ['model.bin', 145216508, 'model.bin', '2a166925539a16005f14ff328359f9b9adb9dc4fb631bb3b227526862e93e2ef'],
   ],
   mirrorBases: [
     'https://hf-mirror.com/',
@@ -4199,6 +4199,19 @@ function asrWizardDetectPython() {
 }
 
 /** 用 Node 原生 https 下载文件（带重定向、进度回调），不依赖 Obsidian 网络层。 */
+/** 流式计算文件 SHA256，避免大文件一次读入内存。 */
+function asrWizardSha256(file) {
+  return new Promise((resolve, reject) => {
+    const fs = require('fs');
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(file);
+    stream.on('data', (c) => hash.update(c));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
 function asrWizardDownload(url, dest, onBytes) {
   return new Promise((resolve, reject) => {
     const https = require('https');
@@ -4344,8 +4357,15 @@ class AsrWizardModal extends Modal {
       this.status('⑤ 下载模型（约 145 MB）…');
       for (let i = 0; i < ASR_WIZARD.modelFiles.length; i++) {
         if (this.cancelled) throw new Error('已取消');
-        const [name, , dest] = ASR_WIZARD.modelFiles[i];
+        const [name, , dest, sha] = ASR_WIZARD.modelFiles[i];
         const target = path.join(modelDir, dest);
+        if (fs.existsSync(target)) {
+          const gotHash = await asrWizardSha256(target);
+          if (gotHash !== sha) {
+            this.log(name + ' 校验失败（文件损坏），删除后重新下载');
+            fs.unlinkSync(target);
+          }
+        }
         if (!fs.existsSync(target)) {
           this.log('下载 ' + name + '…');
           await asrWizardDownload(asrWizardUrl(name), target, (got, total) => {
@@ -4353,6 +4373,12 @@ class AsrWizardModal extends Modal {
             this.pct(basePct);
             if (total) this.status('⑤ 下载模型 ' + name + ' ' + Math.round(got / total * 100) + '%');
           });
+          const gotHash = await asrWizardSha256(target);
+          if (gotHash !== sha) {
+            try { fs.unlinkSync(target); } catch (_) {}
+            throw new Error(name + ' 校验失败：下载文件与官方指纹不符，已删除。请检查网络后重试。');
+          }
+          this.log(name + ' ✓ 校验通过');
         }
       }
       if (this.cancelled) throw new Error('已取消');
@@ -6275,7 +6301,7 @@ module.exports.__statModal = StatModal;
 module.exports.__stats = { mistakeKey, statSeries, monthStat, heatmapWeeks };
 module.exports.__listen = { mergeHours, topShows, listenDiscoveries, clockLabel, ringSlice, rideText, renderClockRing };
 module.exports.__asrSetup = ASR_SETUP;
-module.exports.__asrWizard = { ASR_WIZARD, AsrWizardModal, asrWizardUrl, asrWizardDetectPython, asrWizardBaseDir };
+module.exports.__asrWizard = { ASR_WIZARD, AsrWizardModal, asrWizardUrl, asrWizardDetectPython, asrWizardBaseDir, asrWizardSha256 };
 module.exports.__blind = { pickBlindSegs, segSpan, blindRatio, blindWeeks, BLIND_MIN_SENTENCES };
 module.exports.__blindModal = BlindModal;
 module.exports.__shadow = { scoreShadow, shadowTokens, lcsPairs };

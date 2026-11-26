@@ -1,6 +1,6 @@
 {
   "name": "pineapple-english",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Obsidian plugin for sentence-by-sentence English podcast listening and review.",
   "main": "main.js",
   "private": true,
