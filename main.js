@@ -20,6 +20,25 @@ const {
   apiVersion,
 } = require('obsidian');
 
+/* 反馈入口：Issue 模板预填版本/系统信息，讨论区用于提问交流 */
+const REPO_URL = 'https://github.com/louiseleeAI/pineapple-english';
+const FEEDBACK_ISSUE = REPO_URL + '/issues/new?template=bug_report.md';
+const FEEDBACK_DISCUSS = REPO_URL + '/discussions';
+function feedbackIssueUrl(version) {
+  const ov = (typeof app !== 'undefined' && app && app.version) ? app.version : '未知';
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '未知';
+  const body = [
+    '**遇到了什么问题 / 想提什么建议**', '', '',
+    '**复现步骤（如有）**', '1. ', '2. ', '',
+    '**期望结果**', '', '',
+    '---',
+    '插件版本：' + (version || '未知'),
+    'Obsidian 版本：' + ov,
+    '系统：' + ua,
+  ].join('\n');
+  return FEEDBACK_ISSUE + '&title=' + encodeURIComponent('[反馈] ') + '&body=' + encodeURIComponent(body);
+}
+
 const VIEW_TYPE = 'pineapple-english-view';
 const CACHE_DIR = '.obsidian/plugins/pineapple-english/cache';
 
@@ -1477,6 +1496,16 @@ class EnglishReaderView extends ItemView {
     mkBtn('bookmark-plus', '存为精读笔记', 'saveNote');
     mkBtn('calendar-plus', '记到今日日记', 'toDaily');
     mkBtn('copy', '导出逐字稿 Markdown', 'exportTranscript');
+    const fb = bar.createEl('a', {
+      cls: 'er-icon-btn er-feedback-btn',
+      attr: { href: FEEDBACK_ISSUE, title: '反馈问题 / 提建议（自动带上版本信息）', target: '_blank', rel: 'noopener' },
+    });
+    setIcon(fb, 'message-circle');
+    fb.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(feedbackIssueUrl(this.plugin.manifest && this.plugin.manifest.version), '_blank');
+    };
     const spacer = bar.createDiv('er-spacer');
     if (it.link) {
       const ext = bar.createEl('a', { cls: 'er-ext', attr: { href: it.link, title: '在浏览器打开原文' } });
@@ -4488,6 +4517,18 @@ class EnglishReaderSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl('h2', { text: '菠萝英语精听 设置' });
+    const ver = (this.plugin.manifest && this.plugin.manifest.version) || '未知';
+    const fbox = containerEl.createDiv('er-feedback');
+    fbox.createEl('div', { cls: 'er-feedback-title', text: '反馈与支持' });
+    fbox.createEl('div', { cls: 'er-feedback-desc', text: '遇到问题或有建议，直接提交报告，作者能看得到；使用上的疑问也可以去讨论区交流。' });
+    const facts = fbox.createDiv('er-feedback-actions');
+    facts.createEl('button', { cls: 'mod-cta', text: '报告问题 / 提建议' }).onclick = () => {
+      window.open(feedbackIssueUrl(ver), '_blank');
+    };
+    facts.createEl('button', { text: '去讨论区提问' }).onclick = () => {
+      window.open(FEEDBACK_DISCUSS, '_blank');
+    };
+    fbox.createEl('div', { cls: 'er-feedback-ver', text: '当前版本 ' + ver + ' · 提交时会自动带上版本与系统信息' });
     // 可选增强状态：社区市场只装三件套，把缺失项与补齐方式直接摆出来
     const add = optionalAddons(this.plugin);
     const addBox = containerEl.createEl('div', { cls: 'er-addons' });

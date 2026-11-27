@@ -1251,6 +1251,21 @@
 }
 .er-quick-row button { margin: 0; }
 
+/* 设置页：反馈入口 */
+.er-feedback {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 18px 0;
+  background: var(--background-secondary);
+  font-size: 0.88em;
+}
+.er-feedback-title { font-weight: 600; margin-bottom: 4px; }
+.er-feedback-desc { color: var(--text-muted); line-height: 1.5; margin-bottom: 8px; }
+.er-feedback-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.er-feedback-ver { margin-top: 8px; color: var(--text-faint); font-size: 0.9em; }
+.er-feedback-btn { color: var(--text-accent); }
+
 /* 设置页：可选增强状态（社区市场安装说明） */
 .er-addons {
   border: 1px solid var(--background-modifier-border);
